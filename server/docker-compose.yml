@@ -1,0 +1,20 @@
+# SnapDeploy free container — wjw-kanban backend
+# (auth + board + WebSocket live-sync + Hermes chat proxy → OpenRouter free)
+
+services:
+  backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      HERMES_URL: "https://openrouter.ai/api/v1"
+      HERMES_KEY: "${HERMES_KEY}"
+      HERMES_MODEL: "${HERMES_MODEL:-meta-llama/llama-3.1-8b-instruct:free}"
+      JWT_SECRET: "${JWT_SECRET}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/board').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
