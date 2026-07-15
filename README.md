@@ -1,39 +1,45 @@
-# wjw-kanban-cloud (backend)
+# Hermes-wjw (Wild Jazmine Wellness Planner)
 
-The **server** for the Wild Jazmine Wellness planner: team auth (JWT),
-server-side board store, WebSocket live-sync, and a Hermes chat proxy.
+The complete site served at **https://hermes.wildjazminewellness.ca/**:
+a team content-planning board with **in-app Hermes chat**, **team login**,
+and **live sync**. Frontend (React + Vite) + backend (Node/Express + WebSocket).
 
-This repo is deployed to **SnapDeploy** (free, no card) as a Node container.
-The chat proxy points at a **full Hermes agent** (tools + memory) running
-on the owner's always-on PC, exposed via a Cloudflare tunnel.
+## Architecture
+```
+browser ── hermes.wildjazminewellness.ca (Cloudflare tunnel)
+              └─ backend  (auth, board store, WebSocket live-sync, Hermes chat proxy)
+                    └─ Hermes agent (full, with tools) via HERMES_URL
+```
+- **Frontend**: `src/` (React + TypeScript + Vite). `npm run build` → `dist/`.
+- **Backend**: `server/` (Express + ws). Serves `dist/` in production, plus
+  `/api/*` (auth, board), `/ws` (live sync), `/api/hermes/chat` (Hermes proxy).
+- **Hermes**: the owner's full Hermes agent (tools + memory), reached via
+  `HERMES_URL` (on the owner's PC, exposed through a Cloudflare tunnel).
 
-## Deploy (SnapDeploy, free, no card)
-
-1. SnapDeploy → Connect GitHub → pick this repo (auto-deploy on push).
-2. Or: SnapDeploy → Upload → zip this folder.
-3. Set the container **port to 4000**.
-4. Add environment variables (see `.env.example`):
-   - `HERMES_URL`  → `https://hermes-api.wildjazminewellness.ca` (owner's PC Hermes via tunnel)
-   - `HERMES_MODEL` → `Hermes-Agent` (the owner's Hermes model id)
-   - `JWT_SECRET` → any long random string
+## Deploy (SnapDeploy — free, no card)
+1. SnapDeploy → Connect GitHub → pick this repo (auto-deploy on push),
+   OR Upload the `server/` folder.
+2. Set the container **port to 4000**.
+3. Build/run command: `cd server && npm install && node index.js`
+   (or use the included `Dockerfile`).
+4. Add environment variables (see `server/.env.example`):
+   - `HERMES_URL`  → `https://hermes-api.wildjazminewellness.ca` (owner's Hermes via tunnel)
+   - `HERMES_MODEL` → `Hermes-Agent`
+   - `JWT_SECRET` → a long random string
    - `PORT` → `4000`
-5. Deploy. SnapDeploy gives a public URL, e.g. `https://node-express-app-xxxx.snapdeploy.app`.
+5. SnapDeploy gives a public URL. Point the Cloudflare tunnel
+   `hermes.wildjazminewellness.ca` at it.
 
-## Point the app + tunnel at it
-
-- Cloudflare tunnel `hermes.wildjazminewellness.ca` → SnapDeploy backend URL.
-- The React app (wjw-kanban repo) calls `/api/*` which proxies to this backend.
-
-## Local dev
-
+## Local development
 ```
-cd server
-npm install
-HERMES_URL=http://127.0.0.1:8642 PORT=4000 npm start
+# terminal 1 — backend
+cd server && npm install && PORT=4000 HERMES_URL=http://127.0.0.1:8642 npm start
+# terminal 2 — frontend (Vite dev, proxies /api and /ws to :4000)
+npm install && npm run dev
+# open http://localhost:5173
 ```
 
-## Env reference
-
+## Env reference (backend)
 | Var | Default | Purpose |
 |-----|---------|---------|
 | PORT | 4000 | backend listen port |
@@ -41,4 +47,8 @@ HERMES_URL=http://127.0.0.1:8642 PORT=4000 npm start
 | HERMES_KEY | wjw-local-dev-key | Hermes API key (owner's) |
 | HERMES_MODEL | Hermes-Agent | model id sent to Hermes |
 | JWT_SECRET | changeme | signs auth tokens |
-| SYSTEM_PROMPT | (built-in) | system prompt for chat |
+
+## Files
+- `src/` — React frontend (board, card workspace, chat panel, login, docs, backup)
+- `server/` — Node backend (auth, board store, WebSocket sync, Hermes proxy)
+- `vite.config.ts` — dev proxy for `/api` and `/ws` → backend

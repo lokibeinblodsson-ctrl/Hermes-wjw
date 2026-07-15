@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --color-beige: #e8e1d4;
+  --color-beige-deep: #d8cdb8;
+  --color-dusty: #a8c0c2;
+  --color-dusty-deep: #7e9a9c;
+  --color-sage: #b7c9a8;
+  --color-sage-deep: #9fb89a;
+  --color-charcoal: #2e2e2e;
+  --color-charcoal-soft: #4a4a4a;
+  --color-paper: #f7f4ee;
+  --color-paper-2: #efeae0;
+  --font-sans: "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-paper);
+  color: var(--color-charcoal);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* Thin, calm scrollbars */
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(46, 46, 46, 0.18);
+  border-radius: 8px;
+}
+
+/* Drag affordances */
+.card-dragging {
+  opacity: 0.4;
+  transform: rotate(1.5deg);
+}
+.column-over {
+  outline: 2px dashed var(--color-dusty-deep);
+  outline-offset: -4px;
+}
