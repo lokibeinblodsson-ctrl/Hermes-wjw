@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { api, parseError } from "../lib/api";
 import { useAuth } from "../App";
 import { openHermes } from "../lib/hermesBus";
 
@@ -260,7 +260,9 @@ function CardModal({ card, categories, users, canManage, onClose, onSaved, onDel
       }
       onSaved();
     } catch (e: any) {
-      setErr(e.message);
+      // Surface the server's real validation message (or a friendly fallback)
+      // inline in the modal — never the generic "Request failed (400)".
+      setErr(parseError(e));
     } finally {
       setBusy(false);
     }
@@ -272,7 +274,9 @@ function CardModal({ card, categories, users, canManage, onClose, onSaved, onDel
     try {
       await api.delete(`/board/cards/${card.id}`);
       onDeleted();
-    } catch (e: any) { setErr(e.message); }
+    } catch (e: any) {
+      setErr(parseError(e));
+    }
     finally { setBusy(false); }
   }
 
