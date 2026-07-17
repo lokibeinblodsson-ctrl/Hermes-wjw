@@ -24,7 +24,8 @@ export default function DocsPage() {
   if (error) return <div className="error">{error}</div>;
   if (!doc) return null;
 
-  const d = doc.data;
+  // `doc` already holds the payload (set via setDoc(res.data)), so use it directly.
+  const d = doc;
   const md = toMarkdown(d);
 
   function copyAll() {
