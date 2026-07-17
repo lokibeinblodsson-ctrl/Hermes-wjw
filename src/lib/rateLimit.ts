@@ -60,6 +60,10 @@ export const RATE_LIMITS = {
   // concurrent data loads — never trips the limiter.
   api: { limit: 120, window: 60 }, // general unauthenticated API per IP
   apiAuthenticated: { limit: 500, window: 60 }, // authenticated API per IP
+  // Hermes write-actions: deliberately tight and keyed PER USER (not per IP) so a
+  // runaway loop, compromised session, or adversarial conversation cannot blast
+  // the board. Separate from the general API limit above by design.
+  hermesWrite: { limit: 8, window: 60 }, // 8 confirmed writes / user / minute
 };
 
 export function clientIp(req: Request): string {

@@ -4,6 +4,7 @@ import { verifyJwt } from "./jwt";
 import { Errors } from "./errors";
 import type { SessionUser, Role } from "./types";
 import type { Env } from "./env";
+import { resolveSession } from "../db/users";
 
 export function getBearer(req: Request): string | null {
   const auth = req.headers.get("authorization");
@@ -57,4 +58,20 @@ export const ROLE_RANK: Record<Role, number> = { member: 1, reviewer: 2, moderat
 export function canReview(session: SessionUser | null): boolean {
   if (!session) return false;
   return ROLE_RANK[session.role] >= ROLE_RANK.reviewer;
+}
+
+// ── Shared DB-backed session resolver ───────────────────────────────────────
+// This is the ONE place that turns a raw request into a fully-verified session
+// user (JWT signature + token_version + disabled/suspended status check). Every
+// route file should use this instead of copy-pasting a `me()` helper. Reusing
+// resolveSession from db/users guarantees identical verification everywhere.
+export async function getResolvedUser(req: Request, env: Env): Promise<SessionUser | null> {
+  const token = getBearer(req);
+  if (!token) return null;
+  try {
+    const payload = await verifyJwt(token);
+    return await resolveSession(env.DB, payload.sub, payload.tv || 0);
+  } catch {
+    return null;
+  }
 }

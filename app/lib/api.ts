@@ -50,6 +50,9 @@ export const api = {
   patch: (p: string, b?: unknown) => request("PATCH", p, b),
   put: (p: string, b?: unknown) => request("PUT", p, b),
   delete: (p: string) => request("DELETE", p),
+  // Generic request used by the Hermes action layer to execute a server-issued
+  // plan against the real endpoint (method/path/body straight from the plan).
+  request: (method: string, path: string, body?: unknown) => request(method, path, body),
 };
 
 export function currentUser(): ApiUser | null {

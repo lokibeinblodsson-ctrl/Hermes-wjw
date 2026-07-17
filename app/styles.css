@@ -264,6 +264,14 @@ a.mem-link:hover, .mem-card a:hover { color: var(--text); text-decoration: under
 .hermes-input textarea { flex: 1; resize: none; }
 .hermes-typing { color: var(--muted); font-size: 12px; font-style: italic; }
 .hermes-actions { display: flex; gap: 6px; padding: 0 12px 10px; flex-wrap: wrap; }
+.hermes-actions .small { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
+/* Visual distinction between answer / confirmation / result / denial */
+.hermes-msg.pending .bubble { background: rgba(216,184,120,0.14); border: 1px solid var(--warn); }
+.hermes-msg.pending .who { color: var(--warn); }
+.hermes-msg.result .bubble { background: rgba(138,166,111,0.18); border: 1px solid var(--accent); }
+.hermes-msg.result .who { color: var(--accent-2); }
+.hermes-msg.denied .bubble { background: rgba(210,146,146,0.16); border: 1px solid var(--danger); }
+.hermes-msg.denied .who { color: var(--danger); }
 
 /* Content calendar */
 .cal-page { max-width: 1100px; margin: 0 auto; }

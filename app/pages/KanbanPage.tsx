@@ -150,7 +150,10 @@ export default function KanbanPage() {
         <button className="btn-primary" onClick={() => setEditing({ id: "", column_id: columns[0]?.id || "", title: "", description: "", priority: "medium", due_date: null, category_id: null, tags: [], assignee_id: null } as any)}>
           + New card
         </button>
-        <button className="btn-link" onClick={openHermes} title="Ask the Hermes assistant">💬 Ask Hermes</button>
+        <button className="btn-link" onClick={() => openHermes({
+          board: { cardCount: cards.length, columnCount: columns.length, columns: columns.map((c) => ({ name: c.name, count: 0 })) },
+          hint: `Board open: ${cards.length} cards across ${columns.length} columns.`,
+        })} title="Ask the Hermes assistant (with board context)">💬 Ask Hermes</button>
         {canManage && (
           <span className="addcol">
             <input placeholder="New column" value={creatingCol} onChange={(e) => setCreatingCol(e.target.value)} />

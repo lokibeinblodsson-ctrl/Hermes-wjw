@@ -10,24 +10,22 @@ import {
   categorySchema,
 } from "../lib/validation";
 import { randomId, nowIso, toJson, jsonField } from "../lib/crypto";
-import { resolveSession } from "../db/users";
 import { logAudit, logAnalytics } from "../db/logging";
-import { requireAuth, isAdmin } from "../lib/auth";
+import { getResolvedUser } from "../lib/auth";
+import {
+  canManageColumns,
+  canManageCategories,
+  canEditCard,
+  canDeleteCard,
+} from "../lib/permissions";
 import { ensureDefaults } from "../bootstrap";
 
 const board = new Hono<{ Bindings: Env }>();
 
-// Resolve current user helper (shared JWT extraction).
-async function me(db: D1DatabaseLike, c: any): Promise<ReturnType<typeof resolveSession>> {
-  const auth = c.req.raw.headers.get("authorization");
-  if (!auth) return null;
-  try {
-    const { verifyJwt } = await import("../lib/jwt");
-    const p = await verifyJwt(auth.replace(/^Bearer /, ""));
-    return resolveSession(db, p.sub, p.tv || 0);
-  } catch {
-    return null;
-  }
+// Resolve current user (single shared resolver from auth.ts — verifies JWT,
+// token_version, and disabled/suspended status in one place).
+async function me(c: any) {
+  return getResolvedUser(c.req.raw, c.env);
 }
 type D1DatabaseLike = import("@cloudflare/workers-types").D1Database;
 
@@ -60,9 +58,9 @@ board.get("/columns", async (c) => {
 });
 
 board.post("/columns", zValidator("json", categorySchema), async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
-  if (user.role !== "admin" && user.role !== "moderator") return jsonError(Errors.forbidden());
+  if (!canManageColumns(user)) return jsonError(Errors.forbidden("Only staff can manage columns"));
   const body = await c.req.json();
   const id = randomId("col");
   const pos = (rs0(await c.env.DB.prepare(`SELECT COALESCE(MAX(position),0)+1 as p FROM board_columns`).first()) as number) || 0;
@@ -74,7 +72,7 @@ board.post("/columns", zValidator("json", categorySchema), async (c) => {
 
 // ── Cards ────────────────────────────────────────────────────────────────
 board.get("/cards", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
   const url = new URL(c.req.url);
   const columnId = url.searchParams.get("column_id");
@@ -108,7 +106,7 @@ board.get("/cards", async (c) => {
 });
 
 board.post("/cards", zValidator("json", cardCreateSchema), async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
   const body = await c.req.json();
   // validate column
@@ -145,7 +143,7 @@ board.post("/cards", zValidator("json", cardCreateSchema), async (c) => {
 });
 
 board.get("/cards/:id", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
   const id = c.req.param("id");
   const card = await c.env.DB.prepare(
@@ -162,7 +160,7 @@ board.get("/cards/:id", async (c) => {
 // publishing events tied to content_items linked from this card's sources
 // (kept simple: just audit for now; publishing events are surfaced per-item).
 board.get("/cards/:id/activity", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
   const id = c.req.param("id");
   const limit = Math.min(100, parseInt(new URL(c.req.url).searchParams.get("limit") || "50") || 50);
@@ -174,11 +172,16 @@ board.get("/cards/:id/activity", async (c) => {
 });
 
 board.patch("/cards/:id", zValidator("json", cardUpdateSchema), async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
   const id = c.req.param("id");
   const existing = await c.env.DB.prepare(`SELECT * FROM cards WHERE id = ?`).bind(id).first();
   if (!existing) return jsonError(Errors.notFound("Card not found"));
+  // Ownership check: a member may only edit their own card; moderator+ any.
+  const card = existing as { id: string; created_by: string | null };
+  if (!canEditCard(user, card)) {
+    return jsonError(Errors.forbidden("You can only edit cards you created, unless you are a moderator+"));
+  }
   const body = await c.req.json();
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -204,9 +207,9 @@ board.patch("/cards/:id", zValidator("json", cardUpdateSchema), async (c) => {
 });
 
 board.delete("/cards/:id", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
-  if (user.role !== "admin" && user.role !== "moderator") return jsonError(Errors.forbidden());
+  if (!canDeleteCard(user)) return jsonError(Errors.forbidden("Only moderators+ can delete cards"));
   const id = c.req.param("id");
   const existing = await c.env.DB.prepare(`SELECT id FROM cards WHERE id = ?`).bind(id).first();
   if (!existing) return jsonError(Errors.notFound("Card not found"));
@@ -218,16 +221,16 @@ board.delete("/cards/:id", async (c) => {
 
 // ── Categories ───────────────────────────────────────────────────────────
 board.get("/categories", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
   const rs = await c.env.DB.prepare(`SELECT * FROM categories ORDER BY position ASC, name ASC`).all();
   return json({ ok: true, data: rs.results || [] });
 });
 
 board.post("/categories", zValidator("json", categorySchema), async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
-  if (user.role !== "admin" && user.role !== "moderator") return jsonError(Errors.forbidden("Only staff can manage categories"));
+  if (!canManageCategories(user)) return jsonError(Errors.forbidden("Only staff can manage categories"));
   const body = await c.req.json();
   // prevent duplicate name
   const dup = await c.env.DB.prepare(`SELECT id FROM categories WHERE lower(name) = lower(?)`).bind(body.name).first();
@@ -241,9 +244,9 @@ board.post("/categories", zValidator("json", categorySchema), async (c) => {
 });
 
 board.patch("/categories/:id", zValidator("json", categorySchema.partial()), async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
-  if (user.role !== "admin" && user.role !== "moderator") return jsonError(Errors.forbidden());
+  if (!canManageCategories(user)) return jsonError(Errors.forbidden("Only staff can manage categories"));
   const id = c.req.param("id");
   const existing = await c.env.DB.prepare(`SELECT id FROM categories WHERE id = ?`).bind(id).first();
   if (!existing) return jsonError(Errors.notFound("Category not found"));
@@ -261,9 +264,9 @@ board.patch("/categories/:id", zValidator("json", categorySchema.partial()), asy
 });
 
 board.delete("/categories/:id", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
-  if (user.role !== "admin" && user.role !== "moderator") return jsonError(Errors.forbidden());
+  if (!canManageCategories(user)) return jsonError(Errors.forbidden("Only staff can manage categories"));
   const id = c.req.param("id");
   const existing = await c.env.DB.prepare(`SELECT id FROM categories WHERE id = ?`).bind(id).first();
   if (!existing) return jsonError(Errors.notFound("Category not found"));
@@ -276,9 +279,9 @@ board.delete("/categories/:id", async (c) => {
 
 // Reorder categories (expects ordered array of ids). Staff only.
 board.post("/categories/reorder", async (c) => {
-  const user = await me(c.env.DB, c);
+  const user = await me(c);
   if (!user) return jsonError(Errors.unauthorized());
-  if (user.role !== "admin" && user.role !== "moderator") return jsonError(Errors.forbidden());
+  if (!canManageCategories(user)) return jsonError(Errors.forbidden("Only staff can manage categories"));
   const { ids } = await c.req.json().catch(() => ({ ids: [] }));
   if (!Array.isArray(ids)) return jsonError(Errors.badRequest("ids array required"));
   for (let i = 0; i < ids.length; i++) {
