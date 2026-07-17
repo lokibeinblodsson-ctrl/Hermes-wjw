@@ -157,6 +157,22 @@ board.get("/cards/:id", async (c) => {
   return json({ ok: true, data: serializeCard(card) });
 });
 
+// Card-scoped activity: reuse audit_logs (no separate table). Returns recent
+// audit events where target_type = 'card' and target_id = this card, plus any
+// publishing events tied to content_items linked from this card's sources
+// (kept simple: just audit for now; publishing events are surfaced per-item).
+board.get("/cards/:id/activity", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  const id = c.req.param("id");
+  const limit = Math.min(100, parseInt(new URL(c.req.url).searchParams.get("limit") || "50") || 50);
+  const rs = await c.env.DB.prepare(
+    `SELECT * FROM audit_logs WHERE target_type = 'card' AND target_id = ? ORDER BY created_at DESC LIMIT ?`
+  ).bind(id, limit).all();
+  const rows = ((rs.results as any[]) || []).map((r) => ({ ...r, meta: jsonField(r.meta_json, {}) }));
+  return json({ ok: true, data: rows });
+});
+
 board.patch("/cards/:id", zValidator("json", cardUpdateSchema), async (c) => {
   const user = await me(c.env.DB, c);
   if (!user) return jsonError(Errors.unauthorized());

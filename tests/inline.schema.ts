@@ -245,5 +245,44 @@ export const INLINE_COLUMNS: Record<string, string[]> = {
     "tags_json",
     "updated_at",
     "url"
+  ],
+  "card_comments": [
+    "author_id",
+    "author_name",
+    "body",
+    "card_id",
+    "created_at",
+    "deleted_at",
+    "id",
+    "parent_id",
+    "updated_at"
+  ],
+  "card_sources": [
+    "authors",
+    "card_id",
+    "citation",
+    "created_at",
+    "created_by",
+    "id",
+    "note",
+    "publisher",
+    "retrieved_date",
+    "source_type",
+    "title",
+    "updated_at",
+    "url",
+    "year"
+  ],
+  "card_links": [
+    "card_id",
+    "created_at",
+    "created_by",
+    "id",
+    "link_type",
+    "note",
+    "target_card_id",
+    "target_title",
+    "target_url",
+    "updated_at"
   ]
 };

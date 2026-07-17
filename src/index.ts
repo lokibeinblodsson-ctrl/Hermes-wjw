@@ -21,6 +21,7 @@ import docsRoutes from "./routes/docs";
 import hermesRoutes from "./routes/hermes";
 import calendarRoutes from "./routes/calendar";
 import filesRoutes from "./routes/files";
+import cardhubRoutes from "./routes/cardhub";
 
 // Shared app context type carrying env + request-derived session.
 type Ctx = {
@@ -170,6 +171,7 @@ app.route("/api/v1/docs", docsRoutes);
 app.route("/api/v1/hermes", hermesRoutes);
 app.route("/api/v1/calendar", calendarRoutes);
 app.route("/api/v1/files", filesRoutes);
+app.route("/api/v1/board", cardhubRoutes);
 app.route("/api/v1", apiRoutes);
 
 // Health check.

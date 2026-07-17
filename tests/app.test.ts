@@ -316,6 +316,55 @@ CREATE TABLE IF NOT EXISTS files (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL
 );
+CREATE TABLE IF NOT EXISTS card_comments (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  parent_id TEXT,
+  author_id TEXT,
+  author_name TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL,
+  deleted_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+  FOREIGN KEY (parent_id) REFERENCES card_comments(id) ON DELETE CASCADE,
+  FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_card_comments_card ON card_comments(card_id, created_at);
+CREATE TABLE IF NOT EXISTS card_sources (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  source_type TEXT NOT NULL DEFAULT 'website',
+  authors TEXT NOT NULL DEFAULT '',
+  year TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  publisher TEXT NOT NULL DEFAULT '',
+  url TEXT,
+  retrieved_date TEXT,
+  citation TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_card_sources_card ON card_sources(card_id, created_at);
+CREATE TABLE IF NOT EXISTS card_links (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  link_type TEXT NOT NULL DEFAULT 'related_card',
+  target_card_id TEXT,
+  target_title TEXT NOT NULL DEFAULT '',
+  target_url TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_card_links_card ON card_links(card_id, link_type);
 `;
 
 // Split a SQL script into statements, keeping BEGIN...END trigger bodies
@@ -639,6 +688,72 @@ describe("Phase 2: kanban board", () => {
     const member = await makeMember();
     const r = await api("POST", "/api/v1/board/categories", { name: "x" }, member.token);
     expect(r.status).toBe(403);
+  });
+});
+
+describe("Phase 2b: card hub (comments, sources, links, activity)", () => {
+  let token: string; let columnId: string; let cardId: string;
+  beforeAll(async () => {
+    await clearDb();
+    const a = await makeAdmin(); token = a.token;
+    const cols = await api("GET", "/api/v1/board/columns", undefined, token);
+    columnId = cols.data.data[0].id;
+    const c = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Hub card" }, token);
+    cardId = c.data.data.id;
+  });
+
+  it("threads comments (top-level + reply), lists, and soft-deletes", async () => {
+    const top = await api("POST", `/api/v1/board/cards/${cardId}/comments`, { body: "Top comment" }, token);
+    expect(top.status).toBe(201);
+    const topId = top.data.data.id;
+    const reply = await api("POST", `/api/v1/board/cards/${cardId}/comments`, { body: "A reply", parent_id: topId }, token);
+    expect(reply.status).toBe(201);
+    expect(reply.data.data.parent_id).toBe(topId);
+    const list = await api("GET", `/api/v1/board/cards/${cardId}/comments`, undefined, token);
+    expect(list.data.data.length).toBe(2);
+    const del = await api("DELETE", `/api/v1/board/cards/${cardId}/comments/${topId}`, undefined, token);
+    expect(del.status).toBe(200);
+    const after = await api("GET", `/api/v1/board/cards/${cardId}/comments`, undefined, token);
+    // soft-deleted comment is hidden from the list
+    expect(after.data.data.find((c: any) => c.id === topId)).toBeUndefined();
+  });
+
+  it("rejects a reply whose parent is not on this card", async () => {
+    const r = await api("POST", `/api/v1/board/cards/${cardId}/comments`, { body: "x", parent_id: "not_a_real_parent" }, token);
+    expect(r.status).toBe(400);
+  });
+
+  it("adds a source, auto-builds an APA citation, and deletes it", async () => {
+    const s = await api("POST", `/api/v1/board/cards/${cardId}/sources`, {
+      source_type: "article", authors: "Smith, J.", year: "2022", title: "Mindfulness outcomes", publisher: "J. Wellness",
+    }, token);
+    expect(s.status).toBe(201);
+    expect(s.data.data.citation).toMatch(/Smith, J\./);
+    expect(s.data.data.citation).toMatch(/2022/);
+    const list = await api("GET", `/api/v1/board/cards/${cardId}/sources`, undefined, token);
+    expect(list.data.data.length).toBe(1);
+    const del = await api("DELETE", `/api/v1/board/cards/${cardId}/sources/${s.data.data.id}`, undefined, token);
+    expect(del.status).toBe(200);
+  });
+
+  it("links a related card and a related post, and lists both", async () => {
+    const other = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Linked card" }, token);
+    const otherId = other.data.data.id;
+    const lc = await api("POST", `/api/v1/board/cards/${cardId}/links`, { link_type: "related_card", target_card_id: otherId }, token);
+    expect(lc.status).toBe(201);
+    expect(lc.data.data.target_title).toBe("Linked card");
+    const lp = await api("POST", `/api/v1/board/cards/${cardId}/links`, { link_type: "related_post", target_title: "Live blog post", target_url: "https://example.com/post" }, token);
+    expect(lp.status).toBe(201);
+    const list = await api("GET", `/api/v1/board/cards/${cardId}/links`, undefined, token);
+    expect(list.data.data.length).toBe(2);
+  });
+
+  it("exposes card-scoped activity from audit_logs", async () => {
+    // The link/comment/source actions above should have produced audit entries.
+    const act = await api("GET", `/api/v1/board/cards/${cardId}/activity`, undefined, token);
+    expect(act.status).toBe(200);
+    expect(Array.isArray(act.data.data)).toBe(true);
+    expect(act.data.data.some((a: any) => String(a.action).startsWith("card_"))).toBe(true);
   });
 });
 
