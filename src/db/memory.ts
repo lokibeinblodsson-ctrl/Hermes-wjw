@@ -89,7 +89,7 @@ export async function retrieveMemory(
     .all();
   const semScored: { id: string; sim: number }[] = [];
   const base: RetrievedMemory[] = [];
-  for (const r of (allRows.results as MemoryRow[]) || []) {
+  for (const r of (allRows.results as unknown as MemoryRow[]) || []) {
     const emb = JSON.parse(r.embedding_json || "[]") as number[];
     const sim = cosineSimilarity(embedding, emb);
     semScored.push({ id: r.id, sim });
@@ -143,7 +143,7 @@ export async function recallSince(db: D1Database, sinceIso: string, limit = 20):
     )
     .bind(sinceIso, limit)
     .all();
-  return ((rs.results as MemoryRow[]) || []).map((r) => ({
+  return ((rs.results as unknown as MemoryRow[]) || []).map((r) => ({
     id: r.id,
     type: r.type,
     title: r.title,

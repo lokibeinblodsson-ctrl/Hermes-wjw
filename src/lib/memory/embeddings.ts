@@ -10,7 +10,7 @@
 // this vector as the semantic booster. On a real Cloudflare Worker you can
 // replace computeEmbedding() with a vectorize binding call without changing the
 // retrieval API.
-import { hashToken } from "../lib/crypto"; // reuse sha256 primitive indirectly
+import { hashToken } from "../crypto"; // reuse sha256 primitive indirectly
 
 const STOPWORDS = new Set([
   "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for", "with", "as", "is",

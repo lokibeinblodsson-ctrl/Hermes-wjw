@@ -166,11 +166,12 @@ data.post("/restore", async (c) => {
 // overwrites existing cards. Creates any missing categories referenced by the
 // samples, then inserts all sample cards into the first ("ideas") column.
 data.post("/seed", async (c) => {
-  const user = await me(c.env.DB, c);
-  if (!user) return jsonError(Errors.unauthorized());
-  if (ROLE_RANK[user.role] < ROLE_RANK.admin) {
+  const session = await me(c.env.DB, c);
+  if (!session) return jsonError(Errors.unauthorized());
+  if (ROLE_RANK[session.role] < ROLE_RANK.admin) {
     return jsonError(Errors.forbidden("Admin required to seed sample cards"));
   }
+  const user = session; // narrowed: non-null for the rest of the handler
   await ensureDefaults(c.env.DB);
   const countRow = await c.env.DB.prepare(`SELECT count(*) as c FROM cards`).first();
   const existing = (countRow as { c: number }).c;

@@ -18,8 +18,11 @@ function b64urlToBytes(s: string): Uint8Array {
 }
 
 async function hmacSha256(key: Uint8Array, data: string): Promise<Uint8Array> {
-  const cryptoKey = await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", cryptoKey, enc.encode(data));
+  // Coerce to a concrete ArrayBuffer-backed view so it satisfies BufferSource
+  // under newer lib.dom typings (which reject ArrayBufferLike union).
+  const keyBuf = key.buffer.slice(key.byteOffset, key.byteOffset + key.byteLength);
+  const cryptoKey = await crypto.subtle.importKey("raw", keyBuf as ArrayBuffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", cryptoKey, enc.encode(data) as BufferSource);
   return new Uint8Array(sig);
 }
 

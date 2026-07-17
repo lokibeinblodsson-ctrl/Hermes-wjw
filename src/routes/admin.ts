@@ -4,6 +4,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { Env } from "../lib/env";
+import type { User } from "../lib/types";
 import { json, jsonError, Errors } from "../lib/errors";
 import { userUpdateSchema, taskCreateSchema, taskUpdateSchema, memoryCreateSchema, memoryQuerySchema, inviteSchema } from "../lib/validation";
 import { randomId, nowIso, toJson, jsonField } from "../lib/crypto";
@@ -14,7 +15,7 @@ import { requireRole } from "../lib/auth";
 import { sendEmail, inviteEmailHtml } from "../lib/email";
 import { siteName } from "../lib/env";
 
-const admin = new Hono<{ Bindings: Env }>();
+const admin = new Hono<{ Bindings: Env; Variables: { admin: User } }>();
 type D1DatabaseLike = import("@cloudflare/workers-types").D1Database;
 
 async function me(db: D1DatabaseLike, c: any): Promise<ReturnType<typeof resolveSession>> {
@@ -100,7 +101,7 @@ admin.delete("/users/:id", async (c) => {
   const id = c.req.param("id");
   if (id === adminUser.id) return jsonError(Errors.badRequest("Cannot delete yourself"));
   const target = await getUserById(c.env.DB, id);
-  if (!target) return jsonError(Errors.NotFound());
+  if (!target) return jsonError(Errors.notFound());
   await c.env.DB.prepare(`DELETE FROM users WHERE id = ?`).bind(id).run();
   await logAudit(c.env.DB, { actorId: adminUser.id, action: "admin_delete_user", targetType: "user", targetId: id });
   return json({ ok: true });

@@ -15,6 +15,8 @@ export interface User {
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
+  failed_logins: number;
+  locked_until: string | null;
 }
 
 export type Priority = "low" | "medium" | "high" | "urgent";

@@ -230,7 +230,7 @@ function CardModal({ card, categories, users, canManage, onClose, onSaved, onDel
       priority,
       due_date: dueDate || null,
       category_id: categoryId || null,
-      tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+      tags: tags.split(",").map((t: string) => t.trim()).filter(Boolean),
       assignee_id: assigneeId || null,
     };
     try {
@@ -284,14 +284,14 @@ function CardModal({ card, categories, users, canManage, onClose, onSaved, onDel
             <label>Category</label>
             <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
               <option value="">None</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {categories.map((c: Category) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>
             <label>Assignee</label>
             <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
               <option value="">Unassigned</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.display_name}</option>)}
+              {users.map((u: { id: string; display_name: string }) => <option key={u.id} value={u.id}>{u.display_name}</option>)}
             </select>
           </div>
         </div>

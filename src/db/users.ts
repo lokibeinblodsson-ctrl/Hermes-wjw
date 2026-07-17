@@ -16,6 +16,8 @@ interface UserRow {
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
+  failed_logins: number;
+  locked_until: string | null;
 }
 
 export function rowToUser(r: UserRow): User {
@@ -31,6 +33,8 @@ export function rowToUser(r: UserRow): User {
     created_at: r.created_at,
     updated_at: r.updated_at,
     last_login_at: r.last_login_at,
+    failed_logins: r.failed_logins ?? 0,
+    locked_until: r.locked_until ?? null,
   };
 }
 

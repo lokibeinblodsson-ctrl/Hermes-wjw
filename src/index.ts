@@ -39,7 +39,7 @@ const app = new Hono<Ctx>();
 app.onError((err, c) => {
   console.error("[unhandled]", err);
   if (err instanceof HttpError) {
-    return c.json({ success: false, error: { code: err.code, message: err.message, details: err.details } }, err.status);
+    return c.json({ success: false, error: { code: err.code, message: err.message, details: err.details } }, err.status as Parameters<typeof c.json>[1]);
   }
   return c.json({ success: false, error: { code: "internal_error", message: "Internal server error" } }, 500);
 });
