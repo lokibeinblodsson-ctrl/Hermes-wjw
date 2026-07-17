@@ -64,8 +64,10 @@ values — they are intentionally non-secret dev stand-ins.
    ```
    (outputs to `./public`).
 
-2. Apply migrations to the target D1 database (one time, and again after any
-   new migration file):
+2. Apply migrations to the target D1 database. **This is mandatory and easy to
+   forget — `wrangler deploy` pushes worker code but does NOT run D1 migrations
+   on the remote database.** Run it on every deploy that touches the schema, and
+   again after any new migration file:
    ```
    wrangler d1 migrations apply wild-jazmine-wellness --remote
    ```
@@ -87,6 +89,48 @@ values — they are intentionally non-secret dev stand-ins.
    curl https://app.wildjazminewellness.ca/api/health
    ```
    Expect `{"ok":true,"service":"wild-jazmine-wellness",...}`.
+
+## Recovery: migrations applied but `apply` reports "duplicate column" / SQLITE_ERROR
+
+Symptom: `wrangler d1 migrations apply --remote` fails partway with
+`duplicate column name: <col>` or `no such column` at runtime (500s on
+features that hit a "missing" table/column). Cause: the remote `d1_migrations`
+tracker is **out of sync** with the actual schema — e.g. columns were added
+manually or a prior `apply` crashed mid-file, so the tracker thinks a migration
+was never applied while the schema actually has it.
+
+Real-world example (2026-07-17): the remote D1 only recorded `0001_init.sql`
+in `d1_migrations`, but `cards` already had all of migration 0002's columns.
+`apply` re-ran 0002 and choked on the existing `draft` column. Meanwhile
+migrations 0003/0004 had never run, so `cards.scheduled_date` and the
+`hermes_conversations` / `hermes_messages` / `calendar_items` / `files` /
+`card_comments` / `card_sources` / `card_links` tables were missing — producing
+500s on create-card and the Hermes sidebar. Fix:
+
+1. Inspect actual state (do NOT blindly re-run migrations):
+   ```sql
+   SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+   PRAGMA table_info(cards);                 -- list columns
+   SELECT name FROM d1_migrations ORDER BY id;  -- what the tracker believes
+   ```
+2. For any migration whose schema changes are **already present** but not
+   recorded, insert the tracker row so `apply` skips it:
+   ```sql
+   INSERT INTO d1_migrations (id, name, applied_at)
+   SELECT 2, '0002_card_extend.sql', datetime('now')
+   WHERE NOT EXISTS (SELECT 1 FROM d1_migrations WHERE name='0002_card_extend.sql');
+   ```
+3. Re-run `wrangler d1 migrations apply wild-jazmine-wellness --remote`. The
+   remaining migrations (e.g. 0003, 0004) run cleanly — their `CREATE TABLE IF
+   NOT EXISTS` and guarded `ADD COLUMN` statements are idempotent. Only a bare
+   `ALTER TABLE ... ADD COLUMN` errors on an existing column, which is why step 2
+   is needed first.
+4. Re-verify the missing tables/columns now exist and the tracker shows
+   0001–0004.
+
+Rule of thumb: `CREATE TABLE IF NOT EXISTS` and `ADD COLUMN IF NOT EXISTS`-style
+guards are safe to re-run; bare `ALTER TABLE ... ADD COLUMN` is not. Reconcile
+the tracker, don't mutate an already-correct schema.
 
 ## DNS notes (only if you manage the zone manually)
 
