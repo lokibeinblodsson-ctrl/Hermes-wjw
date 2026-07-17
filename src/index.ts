@@ -1,7 +1,7 @@
 // Wild Jazmine Wellness — main Worker entry.
 // Serves: /api/v1/* REST endpoints + static SPA assets (fallback).
 import { Hono } from "hono";
-import { Env, siteName, IS_PRODUCTION } from "./lib/env";
+import { Env, IS_PRODUCTION } from "./lib/env";
 import { json, jsonError, Errors, HttpError } from "./lib/errors";
 import { setJwtSecret } from "./lib/jwt";
 import { verifyJwt } from "./lib/jwt";

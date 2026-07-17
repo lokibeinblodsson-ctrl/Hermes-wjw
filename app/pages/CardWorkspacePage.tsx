@@ -81,6 +81,7 @@ export default function CardWorkspacePage() {
       setCard(c);
       setColumns(cols.data);
       setCategories(cats.data);
+      setUsers(usersRes.data || []);
       setTitle(c.title || "");
       setDescription(c.description || "");
       setPriority(c.priority || "medium");

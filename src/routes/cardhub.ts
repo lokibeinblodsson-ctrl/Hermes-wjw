@@ -7,7 +7,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { Env } from "../lib/env";
 import { json, jsonError, Errors } from "../lib/errors";
-import { randomId, nowIso, toJson, jsonField } from "../lib/crypto";
+import { randomId, nowIso } from "../lib/crypto";
 import { logAudit } from "../db/logging";
 
 const cardhub = new Hono<{ Bindings: Env }>();
@@ -56,7 +56,7 @@ const commentSchema = z.object({
 });
 
 cardhub.get("/cards/:id/comments", async (c) => {
-  const u = requireUser(await me(c.env.DB, c));
+  requireUser(await me(c.env.DB, c));
   const cardId = c.req.param("id");
   const rs = await c.env.DB.prepare(
     `SELECT * FROM card_comments WHERE card_id = ? AND deleted_at IS NULL ORDER BY created_at ASC`
@@ -152,7 +152,7 @@ cardhub.post("/cards/:id/sources", zValidator("json", sourceSchema), async (c) =
 });
 
 cardhub.patch("/cards/:id/sources/:sid", zValidator("json", sourceSchema.partial()), async (c) => {
-  const u = requireUser(await me(c.env.DB, c));
+  requireUser(await me(c.env.DB, c));
   const cardId = c.req.param("id");
   const sid = c.req.param("sid");
   const existing = await c.env.DB.prepare(`SELECT * FROM card_sources WHERE id = ? AND card_id = ?`).bind(sid, cardId).first();
