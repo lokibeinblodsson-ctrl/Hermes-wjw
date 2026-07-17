@@ -1,0 +1,37 @@
+name = "wild-jazmine-wellness"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+account_id = "274c13cfc3476cfe884ae08648d73cb4"
+
+# Static SPA assets (built by `npm run build:app` into ./public)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# Custom domain on the free workers.dev plan: Cloudflare provisions the DNS
+# CNAME + Universal SSL + Worker routing for this hostname on deploy. A manual
+# proxied CNAME (app -> <worker>.workers.dev) also exists in the zone as a
+# fallback, but the route below is what makes the subdomain actually serve
+# the Worker (a plain CNAME alone 522s).
+[[routes]]
+pattern = "app.wildjazminewellness.ca"
+custom_domain = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wild-jazmine-wellness"
+database_id = "a6a68f29-e6f9-49d6-b081-bee3a92cfc3e"
+migrations_dir = "migrations"
+
+# ── Local / dev / test values (committed dev placeholders) ──
+# For production-grade secrets, use `wrangler secret put` with a DIFFERENT
+# name (secrets and vars cannot share a name). The dev placeholders below are
+# what the local `wrangler dev` and the vitest suite rely on for bootstrap.
+# In production, rotate JWT_SECRET/BOOTSTRAP_TOKEN and set ENVIRONMENT=production
+# via `wrangler secret put` under distinct binding names if hardening is needed.
+[vars]
+JWT_SECRET = "local-dev-only-secret-replace-in-prod"
+BOOTSTRAP_TOKEN = "local-dev-only-bootstrap-replace-in-prod"
+ADMIN_EMAIL = "loki.bein.blodsson@gmail.com"
+ENVIRONMENT = "development"

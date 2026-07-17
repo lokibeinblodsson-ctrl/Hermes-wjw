@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+public/assets/
+public/index.html
+!.gitkeep
+
+# Cloudflare
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# Secrets / provisioned credentials — NEVER commit
+.env
+.env.*
+*.local
+.admin-provision.txt
+admin-provision*.txt
+
+# Logs
+*.log
+logs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
