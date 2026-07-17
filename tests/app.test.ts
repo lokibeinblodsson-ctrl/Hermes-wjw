@@ -611,6 +611,13 @@ describe("Phase 2: kanban board", () => {
     expect(r.status).toBe(400);
   });
 
+  it("rejects create payload missing column_id (mirrors broken UI form, regression guard)", async () => {
+    // The Kanban 'New card' modal must send column_id; if it ever drops it the
+    // backend returns 400. This locks that contract on the API side.
+    const r = await api("POST", "/api/v1/board/cards", { title: "No column", priority: "medium" }, token);
+    expect(r.status).toBe(400);
+  });
+
   it("updates card (move column + priority)", async () => {
     const created = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Move me" }, token);
     const id = created.data.data.id;

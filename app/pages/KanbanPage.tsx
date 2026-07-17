@@ -251,7 +251,10 @@ function CardModal({ card, categories, users, canManage, onClose, onSaved, onDel
     try {
       if (isNew) {
         if (!card.column_id) { setErr("No column available — create a column first."); setBusy(false); return; }
-        await api.post("/board/cards", payload);
+        // backend cardCreateSchema requires column_id; the modal opens new cards
+        // pre-bound to columns[0] (or the ?newcard deep-link), so it's always set
+        // here. Without it the POST returns 400.
+        await api.post("/board/cards", { ...payload, column_id: card.column_id });
       } else {
         await api.patch(`/board/cards/${card.id}`, payload);
       }
