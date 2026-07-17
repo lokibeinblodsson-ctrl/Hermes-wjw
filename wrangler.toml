@@ -24,14 +24,38 @@ database_name = "wild-jazmine-wellness"
 database_id = "a6a68f29-e6f9-49d6-b081-bee3a92cfc3e"
 migrations_dir = "migrations"
 
+# ── Daily business-continuity backup (Cron Triggers) ──
+# Runs runDailyBackup() at 09:07 UTC (a "wrong" minute avoids the top-of-hour
+# stampede). Requires B2_* secrets to be set via `wrangler secret put`. If B2
+# is not configured, the handler no-ops in non-production and logs+throws in
+# production (so a failed backup is visible in the dashboard).
+[[triggers.crons]]
+crons = ["7 9 * * *"]
+
 # ── Local / dev / test values (committed dev placeholders) ──
-# For production-grade secrets, use `wrangler secret put` with a DIFFERENT
-# name (secrets and vars cannot share a name). The dev placeholders below are
-# what the local `wrangler dev` and the vitest suite rely on for bootstrap.
-# In production, rotate JWT_SECRET/BOOTSTRAP_TOKEN and set ENVIRONMENT=production
-# via `wrangler secret put` under distinct binding names if hardening is needed.
+# These are NON-SECRET dev stand-ins used by `wrangler dev` and the vitest
+# suite. They are deliberately low-value and must NEVER hold real credentials.
+# In production, set the sensitive ones via `wrangler secret put` (secrets and
+# vars cannot share a name, so prod uses the same names — secrets override the
+# committed placeholders at runtime; in production JWT_SECRET is REQUIRED or the
+# worker fails closed):
+#   wrangler secret put JWT_SECRET      # strong random; required in prod
+#   wrangler secret put BOOTSTRAP_TOKEN # rotate; dev-only anyway
+#   wrangler secret put ADMIN_EMAIL
+#   wrangler secret put ENVIRONMENT     # value: production
+#   wrangler secret put MAILCHANNELS_TOKEN
+#   wrangler secret put B2_KEY_ID
+#   wrangler secret put B2_APP_KEY
+#   wrangler secret put B2_BUCKET_NAME
+#   wrangler secret put B2_PUBLIC_URL   # e.g. https://s3.us-west-004.backblazeb2.com
+#
+# WARNING: Any value you type into [vars] below is committed to git. Only the
+# dev placeholders belong here. Real secrets go in `wrangler secret put`.
 [vars]
-JWT_SECRET = "local-dev-only-secret-replace-in-prod"
+# BOOTSTRAP_TOKEN is a NON-SECRET dev placeholder (the real prod one is set via
+# `wrangler secret put`). It is needed so `wrangler dev` and the vitest suite can
+# bootstrap the admin. JWT_SECRET is intentionally NOT here — production requires
+# it via `wrangler secret put`, and the worker fails closed without it.
 BOOTSTRAP_TOKEN = "local-dev-only-bootstrap-replace-in-prod"
 ADMIN_EMAIL = "loki.bein.blodsson@gmail.com"
 ENVIRONMENT = "development"

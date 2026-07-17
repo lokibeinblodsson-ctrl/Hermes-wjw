@@ -110,6 +110,10 @@ export interface StoreResult {
   url: string;
 }
 
+// Exported for the scheduled daily-backup module (src/lib/backup.ts), which
+// needs to PUT a JSON snapshot to the same B2 bucket.
+export { s3Put };
+
 // Stores image bytes and returns a public URL. keyHint names the object
 // (e.g. `posts/<id>.png`).
 export async function storeImage(

@@ -1,7 +1,9 @@
 // Wild Jazmine Wellness — main Worker entry.
 // Serves: /api/v1/* REST endpoints + static SPA assets (fallback).
 import { Hono } from "hono";
+import type { ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types";
 import { Env, IS_PRODUCTION } from "./lib/env";
+import { runDailyBackup } from "./lib/backup";
 import { json, jsonError, Errors, HttpError } from "./lib/errors";
 import { setJwtSecret } from "./lib/jwt";
 import { verifyJwt } from "./lib/jwt";
@@ -47,13 +49,18 @@ app.onError((err, c) => {
 
 // Set JWT secret + seed admin at startup of each isolate (idempotent).
 app.use("*", async (c, next) => {
-  // JWT secret: derive deterministically from a secret env. We fall back to a
-  // dev-only secret when no JWT_SECRET provided (tests set one).
-  if (!c.env.JWT_SECRET && c.env.BOOTSTRAP_TOKEN) {
-    // Use BOOTSTRAP_TOKEN as the HMAC key base; it's a secret, not committed.
-    setJwtSecret(`wjw-${c.env.BOOTSTRAP_TOKEN}`);
-  } else if (c.env.JWT_SECRET) {
+  // JWT secret: derive from a real secret env. Production MUST have a real
+  // JWT_SECRET set via `wrangler secret put`. We fail CLOSED in production
+  // rather than silently falling back to a known, guessable dev secret — that
+  // would let anyone forge tokens if the secret were ever forgotten.
+  if (c.env.JWT_SECRET) {
     setJwtSecret(c.env.JWT_SECRET);
+  } else if (!IS_PRODUCTION(c.env) && c.env.BOOTSTRAP_TOKEN) {
+    // Dev/local only: BOOTSTRAP_TOKEN doubles as the HMAC key base. Never in
+    // production — production requires JWT_SECRET.
+    setJwtSecret(`wjw-${c.env.BOOTSTRAP_TOKEN}`);
+  } else if (IS_PRODUCTION(c.env)) {
+    throw new HttpError(500, "internal_error", "JWT_SECRET is not configured");
   } else {
     setJwtSecret("dev-insecure-secret-change-me");
   }
@@ -201,5 +208,13 @@ app.get("*", async (c) => {
   }
 });
 
-export default app;
+// Cron handler: daily business-continuity backup to B2. Wired via
+// `[[triggers.crons]]` in wrangler.toml. No-ops gracefully when B2 is not
+// configured or outside production (see runDailyBackup).
+export default {
+  fetch: app.fetch,
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runDailyBackup(env));
+  },
+};
 export { app, verifyJwt, getBearer };

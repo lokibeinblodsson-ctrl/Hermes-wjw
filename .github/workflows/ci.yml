@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+# Least-privilege: this workflow only reads the repo and runs local gates. It
+# has NO Cloudflare credentials and never deploys. Deploying is a deliberate,
+# authenticated, manual step (see DEPLOY.md).
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck · schema-sync · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 1) Types must be clean.
+      - name: Typecheck
+        run: npm run typecheck
+
+      # 2) Schema drift protection: migrations <-> inline test schema must match.
+      - name: Schema sync
+        run: npm run check:schema
+
+      # 3) Integration tests against real in-memory D1 (incl. Hermes security +
+      #    backup/restore round-trip). Secrets are NOT needed — tests inject dev
+      #    placeholders directly.
+      - name: Tests
+        run: npm test
+
+      # 4) Production frontend build must succeed (calm palette, no regressions).
+      - name: Build
+        run: npm run build
