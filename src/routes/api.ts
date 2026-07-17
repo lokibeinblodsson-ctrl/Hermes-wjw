@@ -39,7 +39,9 @@ api.get("/logs", async (c) => {
   const user = await me(c.env.DB, c);
   if (!user) return jsonError(Errors.unauthorized());
   const limit = Math.min(200, parseInt(new URL(c.req.url).searchParams.get("limit") || "50"));
-  const rs = await c.env.DB.prepare(`SELECT id, action, actor_id, target_type, target_id, created_at FROM analytics_events ORDER BY created_at DESC LIMIT ?`).bind(limit).all();
+  // /logs is an audit feed: the columns (action, actor_id, target_type,
+  // target_id) live on audit_logs, not analytics_events.
+  const rs = await c.env.DB.prepare(`SELECT id, action, actor_id, target_type, target_id, created_at FROM audit_logs ORDER BY created_at DESC LIMIT ?`).bind(limit).all();
   return json({ ok: true, data: rs.results || [] });
 });
 

@@ -64,10 +64,12 @@ board.post("/columns", zValidator("json", categorySchema), async (c) => {
   const body = await c.req.json();
   const id = randomId("col");
   const pos = (rs0(await c.env.DB.prepare(`SELECT COALESCE(MAX(position),0)+1 as p FROM board_columns`).first()) as number) || 0;
+  // Coerce to "" so D1 never receives an undefined bind (it rejects undefined).
+  const color = body.color ?? "";
   await c.env.DB.prepare(`INSERT INTO board_columns (id, name, position, color, created_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(id, body.name, pos, body.color, nowIso()).run();
+    .bind(id, body.name, pos, color, nowIso()).run();
   await logAudit(c.env.DB, { actorId: user.id, action: "board_column_created", targetType: "column", targetId: id });
-  return json({ ok: true, data: { id, name: body.name, position: pos, color: body.color } }, 201);
+  return json({ ok: true, data: { id, name: body.name, position: pos, color } }, 201);
 });
 
 // Delete a column. Staff only (same gate as creation). We deliberately BLOCK
@@ -257,8 +259,11 @@ board.post("/categories", zValidator("json", categorySchema), async (c) => {
   if (dup) return jsonError(Errors.conflict("A category with this name already exists"));
   const id = randomId("cat");
   const pos = (rs0(await c.env.DB.prepare(`SELECT COALESCE(MAX(position),0)+1 as p FROM categories`).first()) as number) || 0;
+  // Coerce to "" so D1 never receives an undefined bind (it rejects undefined).
+  const color = body.color ?? "";
+  const description = body.description || "";
   await c.env.DB.prepare(`INSERT INTO categories (id, name, description, color, position, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, body.name, body.description || "", body.color, pos, user.id, nowIso(), nowIso()).run();
+    .bind(id, body.name, description, color, pos, user.id, nowIso(), nowIso()).run();
   await logAudit(c.env.DB, { actorId: user.id, action: "category_created", targetType: "category", targetId: id });
   return json({ ok: true, data: { id, name: body.name, color: body.color, position: pos } }, 201);
 });
