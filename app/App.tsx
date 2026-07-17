@@ -12,8 +12,11 @@ import CardWorkspacePage from "./pages/CardWorkspacePage";
 import DocsPage from "./pages/DocsPage";
 import CalendarPage from "./pages/CalendarPage";
 import FilesPage from "./pages/FilesPage";
+import ActivityPage from "./pages/ActivityPage";
 import HermesChatDock from "./components/HermesChatDock";
+import CommandPalette from "./components/CommandPalette";
 import PasswordField from "./components/PasswordField";
+import { PALETTE_OPEN_EVENT, PALETTE_TOGGLE_EVENT, PALETTE_CLOSE_EVENT } from "./lib/commandBus";
 
 interface AuthCtx {
   user: ApiUser | null;
@@ -32,6 +35,7 @@ export default function App() {
   const [user, setUserState] = useState<ApiUser | null>(currentUser());
   const [loading, setLoading] = useState<boolean>(!!getToken());
   const [hermesOpen, setHermesOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const navigate = useNavigate();
 
   // Allow any page to open/toggle the Hermes dock (e.g. board toolbar button).
@@ -43,6 +47,29 @@ export default function App() {
     return () => {
       window.removeEventListener("wjw:open-hermes", open);
       window.removeEventListener("wjw:toggle-hermes", toggle);
+    };
+  }, []);
+
+  // Command palette: global keyboard shortcut (Cmd/Ctrl+K) + event-bus bridge.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    const onOpen = () => setPaletteOpen(true);
+    const onToggle = () => setPaletteOpen((o) => !o);
+    const onClose = () => setPaletteOpen(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener(PALETTE_OPEN_EVENT, onOpen);
+    window.addEventListener(PALETTE_TOGGLE_EVENT, onToggle);
+    window.addEventListener(PALETTE_CLOSE_EVENT, onClose);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(PALETTE_OPEN_EVENT, onOpen);
+      window.removeEventListener(PALETTE_TOGGLE_EVENT, onToggle);
+      window.removeEventListener(PALETTE_CLOSE_EVENT, onClose);
     };
   }, []);
 
@@ -132,6 +159,7 @@ export default function App() {
             {user.role === "admin" || user.role === "moderator" || user.role === "reviewer" ? <Link to="/publish">Publish</Link> : null}
             {user.role === "admin" || user.role === "moderator" ? <Link to="/files">Files</Link> : null}
             {user.role === "admin" || user.role === "moderator" ? <Link to="/admin">Admin</Link> : null}
+            <button className="btn-link nav-cmd" onClick={() => setPaletteOpen(true)} title="Command palette (⌘/Ctrl + K)">⌘ Search</button>
           </div>
           <div className="nav-user">
             <span className="badge">{user.role}</span>
@@ -148,6 +176,7 @@ export default function App() {
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/memory" element={<MemoryPage />} />
             <Route path="/docs" element={<DocsPage />} />
+            <Route path="/activity" element={<ActivityPage />} />
             <Route path="/files" element={<FilesPage />} />
             {user.role === "admin" || user.role === "moderator" || user.role === "reviewer" ? (
               <Route path="/publish" element={<PublishingPage />} />
@@ -159,6 +188,7 @@ export default function App() {
           </Routes>
         </main>
         <HermesChatDock open={hermesOpen} onClose={() => setHermesOpen(false)} />
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       </div>
     </Ctx.Provider>
   );

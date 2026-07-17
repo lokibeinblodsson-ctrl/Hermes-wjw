@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../App";
 import DataPage from "./DataPage";
@@ -7,7 +8,9 @@ type Tab = "users" | "tasks" | "categories" | "audit" | "analytics" | "flags" | 
 
 export default function AdminPage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>("users");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = (searchParams.get("tab") as Tab) || "users";
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [error, setError] = useState("");
 
   if (user?.role !== "admin" && user?.role !== "moderator") {

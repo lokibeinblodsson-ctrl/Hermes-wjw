@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../App";
 
@@ -8,6 +9,7 @@ interface Message { id: string; thread_id: string; parent_id: string | null; aut
 
 export default function ChatPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [activeChannel, setActiveChannel] = useState<string>("");
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -22,9 +24,19 @@ export default function ChatPage() {
     try {
       const res = await api.get("/chat/channels");
       setChannels(res.data);
-      if (res.data.length && !activeChannel) setActiveChannel(res.data[0].id);
+      const deep = searchParams.get("channel");
+      if (deep) {
+        // Select the deep-linked channel (from the command palette) if it exists.
+        if (res.data.some((c: Channel) => c.id === deep)) {
+          setActiveChannel(deep);
+          searchParams.delete("channel");
+          setSearchParams(searchParams, { replace: true });
+        }
+      } else if (res.data.length && !activeChannel) {
+        setActiveChannel(res.data[0].id);
+      }
     } catch (e: any) { setError(e.message); }
-  }, [activeChannel]);
+  }, [activeChannel, searchParams, setSearchParams]);
 
   useEffect(() => { loadChannels(); }, [loadChannels]);
 

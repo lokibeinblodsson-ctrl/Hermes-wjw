@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../App";
 import { openHermes } from "../lib/hermesBus";
@@ -23,6 +23,7 @@ interface Card {
 export default function KanbanPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [columns, setColumns] = useState<Column[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
@@ -70,6 +71,17 @@ export default function KanbanPage() {
   }, [search, filterCat, filterPriority, filterAssignee, sort, user]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link: `?newcard=1` (e.g. from the command palette) opens the new-card
+  // modal once columns are loaded, then clears the flag from the URL.
+  useEffect(() => {
+    if (searchParams.get("newcard") === "1" && columns.length && !editing) {
+      setEditing({ id: "", column_id: columns[0]?.id || "", title: "", description: "", priority: "medium", due_date: null, category_id: null, tags: [], assignee_id: null } as any);
+      searchParams.delete("newcard");
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, columns, editing]);
 
   const canManage = user?.role === "admin" || user?.role === "moderator";
 

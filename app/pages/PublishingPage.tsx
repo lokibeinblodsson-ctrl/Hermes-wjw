@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../App";
 
@@ -20,6 +21,7 @@ interface ContentItem {
 // - moderators+ can publish (generates + stores the hero image)
 export default function PublishingPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<ContentItem[]>([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,6 +32,13 @@ export default function PublishingPage() {
   const canReview = user && ["reviewer", "moderator", "admin"].includes(user.role);
   const canPublish = user && ["moderator", "admin"].includes(user.role);
 
+  // Deep-link `?view=review|queue` (from the command palette) filters the list.
+  const view = searchParams.get("view");
+  const visible = items.filter((it) => {
+    if (view === "review") return it.status === "in_review";
+    if (view === "queue") return it.status !== "published";
+    return true;
+  });
   async function load() {
     try {
       const res = await api.get("/publishing");
@@ -88,7 +97,7 @@ export default function PublishingPage() {
           {items.length === 0 && (
             <tr><td colSpan={5} className="empty">No content yet.</td></tr>
           )}
-          {items.map((it) => (
+          {visible.map((it) => (
             <tr key={it.id}>
               <td>
                 <div><strong>{it.title}</strong></div>
