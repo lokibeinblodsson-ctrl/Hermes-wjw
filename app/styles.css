@@ -83,6 +83,8 @@ h1, h2, h3 { color: var(--text); }
 .column-head { padding: 10px 12px; font-weight: 600; border-left: 4px solid var(--accent); border-top-left-radius: 10px; border-top-right-radius: 10px; display: flex; align-items: center; gap: 8px; }
 .column-head .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .column-head .count { margin-left: auto; background: var(--panel-2); padding: 1px 8px; border-radius: 10px; font-size: 12px; color: var(--muted); }
+.column-head .col-del { margin-left: 8px; background: transparent; border: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; border-radius: 6px; }
+.column-head .col-del:hover { color: var(--danger); background: rgba(210,146,146,0.14); }
 .cards { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 40px; }
 .card { background: var(--panel-2); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 8px; padding: 9px 10px; cursor: grab; }
 .card.priority-urgent { border-left-color: var(--danger); }

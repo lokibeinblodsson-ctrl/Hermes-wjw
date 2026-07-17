@@ -70,6 +70,26 @@ board.post("/columns", zValidator("json", categorySchema), async (c) => {
   return json({ ok: true, data: { id, name: body.name, position: pos, color: body.color } }, 201);
 });
 
+// Delete a column. Staff only (same gate as creation). We deliberately BLOCK
+// deletion of a non-empty column: cards.column_id is FK'd ON DELETE CASCADE, so
+// removing the column would silently wipe its cards. The UI requires the column
+// to be emptied (or its cards moved) first — fail closed with a clear message.
+board.delete("/columns/:id", async (c) => {
+  const user = await me(c);
+  if (!user) return jsonError(Errors.unauthorized());
+  if (!canManageColumns(user)) return jsonError(Errors.forbidden("Only staff can manage columns"));
+  const id = c.req.param("id");
+  const col = await c.env.DB.prepare(`SELECT id FROM board_columns WHERE id = ?`).bind(id).first();
+  if (!col) return jsonError(Errors.notFound("Column not found"));
+  const count = (rs0(await c.env.DB.prepare(`SELECT COUNT(*) as n FROM cards WHERE column_id = ?`).bind(id).first()) as number) || 0;
+  if (count > 0) {
+    return jsonError(Errors.badRequest(`Cannot delete column — it still has ${count} card(s). Move or delete them first.`));
+  }
+  await c.env.DB.prepare(`DELETE FROM board_columns WHERE id = ?`).bind(id).run();
+  await logAudit(c.env.DB, { actorId: user.id, action: "board_column_deleted", targetType: "column", targetId: id });
+  return json({ ok: true, data: { id } });
+});
+
 // ── Cards ────────────────────────────────────────────────────────────────
 board.get("/cards", async (c) => {
   const user = await me(c);

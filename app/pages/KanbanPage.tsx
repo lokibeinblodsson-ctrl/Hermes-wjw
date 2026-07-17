@@ -106,6 +106,14 @@ export default function KanbanPage() {
    } catch (e: any) { setError(e.message); }
  }
 
+  async function deleteColumn(colId: string, colName: string) {
+   if (!confirm(`Delete column "${colName}"? It must be empty first (move or delete its cards).`)) return;
+   try {
+     await api.delete(`/board/columns/${colId}`);
+     load();
+   } catch (e: any) { setError(parseError(e)); }
+  }
+
  async function downloadBackup() {
    try {
      const res = await api.get("/data/backup");
@@ -178,6 +186,14 @@ export default function KanbanPage() {
             <div className="column-head" style={{ borderColor: col.color }}>
               <span className="dot" style={{ background: col.color }} />
               {col.name} <span className="count">{filteredCards(col.id).length}</span>
+              {canManage && (
+                <button
+                  className="col-del"
+                  title={`Delete column "${col.name}"`}
+                  aria-label={`Delete column ${col.name}`}
+                  onClick={(e) => { e.stopPropagation(); deleteColumn(col.id, col.name); }}
+                >×</button>
+              )}
             </div>
             <div className="cards">
               {filteredCards(col.id).map((card) => {
