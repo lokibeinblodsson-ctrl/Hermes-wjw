@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import type { ScheduledEvent, ExecutionContext } from "@cloudflare/workers-types";
 import { Env, IS_PRODUCTION } from "./lib/env";
 import { runDailyBackup } from "./lib/backup";
+import { runModelWatchdog } from "./lib/modelWatchdog";
 import { json, jsonError, Errors, HttpError } from "./lib/errors";
 import { setJwtSecret } from "./lib/jwt";
 import { verifyJwt } from "./lib/jwt";
@@ -215,6 +216,8 @@ export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(runDailyBackup(env));
+    // Refresh the free-model map so Hermes always uses currently-free models.
+    ctx.waitUntil(runModelWatchdog(env).then(() => undefined));
   },
 };
 export { app, verifyJwt, getBearer };

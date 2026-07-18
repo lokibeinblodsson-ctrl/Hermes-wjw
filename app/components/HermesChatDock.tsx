@@ -121,6 +121,40 @@ function parseIntent(text: string, columns: Column[]): Intent | null {
   return null;
 }
 
+// Human-readable summary of a server/LLM-proposed action for the confirm card.
+function summarizeAction(action: string, params: Record<string, any>, columns: Column[]): string {
+  const colName = (id: any) => columns.find((c) => c.id === id)?.name || id;
+  switch (action) {
+    case "create_card":
+      return `Create a new card${params.column_id ? ` in "${colName(params.column_id)}"` : ""} titled "${params.title}"`;
+    case "update_card":
+      return `Update card ${params.card_id}: ${Object.keys(params.fields || {}).join(", ") || "(no fields)"}`;
+    case "move_card":
+      return `Move card ${params.card_id} to "${colName(params.column_id)}"`;
+    case "comment_on_card":
+      return `Comment on card ${params.card_id}: "${String(params.body || "").slice(0, 80)}"`;
+    case "add_source":
+      return `Add a source/citation to card ${params.card_id}`;
+    case "link_file":
+      return `Link file "${params.name}" (${params.url})`;
+    case "schedule_card":
+      return `Schedule card ${params.card_id} for ${params.scheduled_date}`;
+    case "submit_for_review":
+      return `Submit content ${params.content_id} for review`;
+    case "approve_card":
+      return `Approve content ${params.content_id}`;
+    case "publish_card":
+      return `Publish content ${params.content_id}`;
+    default:
+      return `${ACTION_LABELS[action] || action}`;
+  }
+}
+
+// Keep parseIntent referenced (offline fallback for obvious action phrasing when
+// the server is unreachable). Currently the server LLM handles intent; this is
+// retained intentionally.
+void parseIntent;
+
 export default function HermesChatDock({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user } = useAuth();
   const [convs, setConvs] = useState<Conv[]>([]);
@@ -181,7 +215,9 @@ export default function HermesChatDock({ open, onClose }: { open: boolean; onClo
     } catch { /* ignore */ }
   }
 
-  // Submit a chat question (read-only path).
+  // Submit a chat question. The server may return a proposed_action (the LLM
+  // decided the user wants to DO something) — if so, render a confirmation card
+  // instead of a plain reply. Nothing is executed until the user confirms.
   async function sendChat(text: string) {
     if (busy) return;
     setBusy(true);
@@ -190,7 +226,18 @@ export default function HermesChatDock({ open, onClose }: { open: boolean; onClo
     try {
       const r = await api.post("/hermes/chat", { conversation_id: activeId || undefined, message: text });
       if (!activeId && r.data.conversation_id) setActiveId(r.data.conversation_id);
-      setMessages((m) => [...m, { id: `a_${Date.now()}`, role: "assistant", body: r.data.reply }]);
+      const pa = r.data.proposed_action;
+      if (pa && pa.action) {
+        // Server/LLM proposed an action — show reply text (if any) then a confirm card.
+        if (r.data.reply) setMessages((m) => [...m, { id: `a_${Date.now()}`, role: "assistant", body: r.data.reply }]);
+        setMessages((m) => [...m, {
+          id: `conf_${Date.now()}`, role: "pending",
+          body: summarizeAction(pa.action, pa.params, columns),
+          action: pa.action, params: pa.params, summary: summarizeAction(pa.action, pa.params, columns),
+        }]);
+      } else {
+        setMessages((m) => [...m, { id: `a_${Date.now()}`, role: "assistant", body: r.data.reply }]);
+      }
       loadConvs();
     } catch (e: any) {
       setMessages((m) => [...m, { id: `err_${Date.now()}`, role: "assistant", body: `⚠️ ${e.message || "Failed"}` }]);
@@ -199,24 +246,16 @@ export default function HermesChatDock({ open, onClose }: { open: boolean; onClo
     }
   }
 
-  // Called when the user types something. Either it's a confirmable action or a
-  // read-only question.
+  // Called when the user types something. We now always send to the server —
+  // the LLM decides whether it's a question or an action and returns a
+  // proposed_action when appropriate (which sendChat renders as a confirm card).
+  // The client-side parseIntent below is kept as an OFFLINE fallback: if the
+  // server is unreachable we can still detect obvious action phrasing.
   function handleSend() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
-    const intent = parseIntent(text, columns);
-    if (intent) {
-      // Show a confirmation card — nothing is sent to the server yet.
-      const id = `pend_${Date.now()}`;
-      setMessages((m) => [...m, { id, role: "user", body: text }]);
-      setMessages((m) => [...m, {
-        id: `conf_${Date.now()}`, role: "pending", body: intent.summary,
-        action: intent.action, params: intent.params, summary: intent.summary,
-      }]);
-    } else {
-      sendChat(text);
-    }
+    sendChat(text);
   }
 
   // User confirmed a pending action. Step 1: ask the server to authorize +

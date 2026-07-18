@@ -41,6 +41,9 @@ import {
   checkHermesAction,
   type HermesAction,
 } from "../lib/permissions";
+import { runLlmChain, type FreeModelMap, type LlmMessage } from "../lib/llm";
+import { buildTools, buildSystemPrompt } from "../lib/hermesLlm";
+import { runModelWatchdog } from "../lib/modelWatchdog";
 
 // Import the REAL route apps so we forward to their exact handlers — one write
 // path, one permission check. (Each already enforces permissions.ts on its own.)
@@ -196,7 +199,54 @@ hermes.post("/chat", zValidator("json", sendSchema), async (c) => {
   const memories = ((memRs.results as any[]) || []).map((m) => ({ title: m.title, type: m.type }));
   const context = { board: snapshot, memories };
 
-  const reply = await respond(message, context);
+  // Column id/name list for the LLM so it can fill column_id on create/move.
+  const colRs = await c.env.DB.prepare(`SELECT id, name FROM board_columns ORDER BY position ASC`).all();
+  const columns = ((colRs.results as any[]) || []).map((r) => ({ id: r.id, name: r.name }));
+
+  // Load recent conversation history (so the assistant has memory of the thread).
+  const histRs = await c.env.DB.prepare(
+    `SELECT role, body FROM hermes_messages WHERE conversation_id = ? ORDER BY created_at ASC LIMIT 20`
+  ).bind(conversationId).all();
+  const history = ((histRs.results as any[]) || []).map((m) => ({ role: m.role, body: m.body }));
+
+  // Try the free-provider LLM chain; fall back to the rule-based responder.
+  let reply = "";
+  let usedProvider = "rule-based";
+  let usedModel = "";
+  let proposedAction: { action: string; params: Record<string, unknown> } | undefined;
+
+  const map = await loadFreeModelMap(c.env.DB);
+  const sys = buildSystemPrompt({
+    board: snapshot,
+    columns,
+    memories,
+    userRole: user.role,
+    userName: user.email,
+  });
+  const llmMessages: LlmMessage[] = [
+    { role: "system", content: sys },
+    ...history.map((h): LlmMessage => ({
+      role: h.role === "assistant" ? "assistant" : "user",
+      content: h.body,
+    })),
+    { role: "user", content: message },
+  ];
+
+  const llm = await runLlmChain(c.env, map, llmMessages, buildTools());
+  if (llm.provider !== "none") {
+    usedProvider = llm.provider;
+    usedModel = llm.model;
+    reply = llm.text;
+    if (llm.action && HERMES_ALLOWED_ACTIONS.includes(llm.action.action as HermesAction)) {
+      proposedAction = { action: llm.action.action, params: llm.action.params };
+      if (!reply) {
+        reply = `I can ${HERMES_ACTION_LABELS[llm.action.action as HermesAction].toLowerCase()} for you — confirm below to proceed.`;
+      }
+    }
+  } else {
+    // All providers failed/absent — safe rule-based fallback (never fully dead).
+    reply = await respond(message, context);
+  }
 
   // Persist the USER message first (so history shows the full conversation),
   // then the assistant reply. Both are scoped to the conversation above.
@@ -208,16 +258,53 @@ hermes.post("/chat", zValidator("json", sendSchema), async (c) => {
   const asstMsgId = randomId("hm");
   await c.env.DB.prepare(
     `INSERT INTO hermes_messages (id, conversation_id, role, body, context_json, created_at) VALUES (?, ?, 'assistant', ?, ?, ?)`
-  ).bind(asstMsgId, conversationId, reply, toJson({ used: "rule-based", board_cards: snapshot.cards }), nowIso()).run();
+  ).bind(asstMsgId, conversationId, reply, toJson({ used: usedProvider, model: usedModel, board_cards: snapshot.cards, proposed_action: proposedAction ?? null }), nowIso()).run();
   await logAudit(c.env.DB, { actorId: user.id, action: "hermes_chat", targetType: "hermes_conversation", targetId: conversationId });
-  return json({ ok: true, data: { conversation_id: conversationId, reply, context } }, 201);
+  return json({ ok: true, data: { conversation_id: conversationId, reply, context, provider: usedProvider, model: usedModel, proposed_action: proposedAction ?? null } }, 201);
 });
+
+// Load the watchdog-maintained free-model map from D1 settings. Returns null
+// if unset (the chain then uses compiled defaults + whatever keys exist).
+async function loadFreeModelMap(db: D1DatabaseLike): Promise<FreeModelMap | null> {
+  try {
+    const row = await db.prepare(`SELECT value_json FROM settings WHERE key = 'hermes_free_models'`).first() as { value_json?: string } | null;
+    if (!row?.value_json) return null;
+    return JSON.parse(row.value_json) as FreeModelMap;
+  } catch {
+    return null;
+  }
+}
 
 hermes.get("/conversations", async (c) => {
   const user = await me(c.env.DB, c);
   if (!user) return jsonError(Errors.unauthorized());
   const rs = await c.env.DB.prepare(`SELECT * FROM hermes_conversations WHERE user_id = ? ORDER BY updated_at DESC`).bind(user.id).all();
   return json({ ok: true, data: rs.results || [] });
+});
+
+// LLM provider status: which free providers are live (from the watchdog map).
+// Read-only; any signed-in user may see it (no keys are ever returned).
+hermes.get("/llm-status", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  const map = await loadFreeModelMap(c.env.DB);
+  return json({ ok: true, data: {
+    live: map?.order ?? [],
+    models: map?.models ?? {},
+    disabled: map?.disabled ?? [],
+    updated_at: map?.updated_at ?? null,
+  } });
+});
+
+// Manually run the free-model watchdog (admin only). Lets you refresh the chain
+// right after adding a new provider key, without waiting for the daily cron.
+hermes.post("/llm-refresh", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  if (user.role !== "admin") return jsonError(Errors.forbidden("Only admins can refresh the LLM provider map."));
+  const result = await runModelWatchdog(c.env);
+  await logAudit(c.env.DB, { actorId: user.id, action: "hermes_llm_refresh", targetType: "settings", targetId: "hermes_free_models" });
+  return json({ ok: true, data: { live: result.order, models: result.models, disabled: result.disabled, summary: result.summary } });
 });
 
 hermes.get("/conversations/:id/messages", async (c) => {

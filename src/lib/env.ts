@@ -27,6 +27,14 @@ export interface Env {
   // Image generation (Item 3): Cloudflare Workers AI binding (optional).
   AI?: AiLike;
   AI_MODEL_TEXT_TO_IMAGE?: string;
+  // In-app Hermes LLM — FREE providers only, prioritised fallback chain.
+  // Each is optional; the chain uses whichever keys are set (see src/lib/llm.ts).
+  // Set via `wrangler secret put <NAME>`.
+  GEMINI_API_KEY?: string;
+  GROQ_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+  CEREBRAS_API_KEY?: string;
+  MISTRAL_API_KEY?: string;
 }
 
 export const IS_PRODUCTION = (env?: Env): boolean =>
