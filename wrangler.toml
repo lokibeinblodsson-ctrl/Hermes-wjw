@@ -58,4 +58,9 @@ crons = ["7 9 * * *"]
 # it via `wrangler secret put`, and the worker fails closed without it.
 BOOTSTRAP_TOKEN = "local-dev-only-bootstrap-replace-in-prod"
 ADMIN_EMAIL = "loki.bein.blodsson@gmail.com"
-ENVIRONMENT = "development"
+# NOTE: ENVIRONMENT is intentionally NOT a [vars] entry. It is set per-environment
+# via `wrangler secret put ENVIRONMENT` (value: "production" on the live worker).
+# Hardcoding "development" here previously left the LIVE worker in dev mode (HSTS
+# off, dev fallbacks active). The secret wins over [vars], so it must not also be
+# declared here. Local `wrangler dev` falls back to development when the secret
+# is absent, as intended.

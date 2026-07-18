@@ -42,9 +42,17 @@ const app = new Hono<Ctx>();
 // instead of Hono's default 500 with no body.
 // ── Security headers (defense-in-depth) ──────────────────────────────────
 // Applied to EVERY response (HTML, API JSON, static assets) as well as error
-// responses. The SPA only ever talks to its own /api/v1 origin — there are no
-// cross-origin fetch()/WebSocket/external <script> origins — so a strict CSP
-// is safe and blocks XSS / clickjacking / MIME-sniffing vectors.
+// responses. The SPA only ever talks to its own /api/v1 origin and loads NO
+// inline scripts (Vite bundles all app code to external /assets/*.js, covered
+// by 'self'). So script-src 'self' is both safe and sufficient.
+//
+// NOTE: Cloudflare's zone-injected scripts (Bot Fight Mode's inline "challenge"
+// loader + Web Analytics beacon at static.cloudflareinsights.com) are NOT
+// allowed. They are third-party, their inline content varies per request (so
+// it cannot be safely hash-pinned), and the app does not depend on them — this
+// is an intentional security boundary, not an oversight. If Bot Fight Mode or
+// Web Analytics are wanted, disable them at the Cloudflare zone instead of
+// weakening this policy with 'unsafe-inline'.
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": [
     "default-src 'self'",
