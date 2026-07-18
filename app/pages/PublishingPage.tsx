@@ -42,7 +42,7 @@ export default function PublishingPage() {
   async function load() {
     try {
       const res = await api.get("/publishing");
-      if (res.ok) setItems(res.data.data as ContentItem[]);
+      if (res.ok) setItems(res.data as ContentItem[]);
     } catch (e: any) {
       setErr(e.message);
     }

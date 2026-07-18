@@ -42,7 +42,7 @@ export default function DataPage({ compact = false }: { compact?: boolean }) {
       // Build a restore payload: accept envelope, {backup}, or flat array.
       const body: any = Array.isArray(parsed) ? parsed : parsed.backup ? { backup: parsed.backup } : { backup: parsed };
       const res = await api.post("/data/restore", body);
-      setPreview({ ...res.data.data, file: file.name });
+      setPreview({ ...res.data, file: file.name });
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -58,7 +58,7 @@ export default function DataPage({ compact = false }: { compact?: boolean }) {
       const parsed = JSON.parse(text);
       const body = Array.isArray(parsed) ? parsed.concat({ confirm: true }) : parsed.backup ? { backup: parsed.backup, confirm: true } : { backup: parsed, confirm: true };
       const res = await api.post("/data/restore", body);
-      setReport(res.data.data);
+      setReport(res.data);
       setPreview(null);
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
