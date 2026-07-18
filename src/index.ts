@@ -40,12 +40,70 @@ const app = new Hono<Ctx>();
 // Global error handler: catches unhandled throws (incl. thrown HttpError from
 // middleware guards like requireRole) and returns a structured JSON body
 // instead of Hono's default 500 with no body.
+// ── Security headers (defense-in-depth) ──────────────────────────────────
+// Applied to EVERY response (HTML, API JSON, static assets) as well as error
+// responses. The SPA only ever talks to its own /api/v1 origin — there are no
+// cross-origin fetch()/WebSocket/external <script> origins — so a strict CSP
+// is safe and blocks XSS / clickjacking / MIME-sniffing vectors.
+const SECURITY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'", // React inline style attributes + vendored CSS
+    "img-src 'self' data: https:", // card media may reference external https URLs
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join("; "),
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+  // HSTS is added below but ONLY in production — it must never be sent over
+  // plain HTTP (browsers ignore it there anyway, but emitting it only on TLS
+  // keeps the intent explicit and avoids any preload-list confusion).
+};
+
+// NOTE: response headers are *immutable* in the Workers runtime / Miniflare,
+// so we must use Hono's `c.header()` setter (which writes to the outgoing
+// response) rather than mutating `c.res.headers` directly.
+function applySecurityHeaders(c: { header: (k: string, v: string) => void; env: Env }): void {
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) c.header(k, v);
+  if (IS_PRODUCTION(c.env)) {
+    c.header("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+  }
+}
+
 app.onError((err, c) => {
   console.error("[unhandled]", err);
+  let res: Response;
   if (err instanceof HttpError) {
-    return c.json({ success: false, error: { code: err.code, message: err.message, details: err.details } }, err.status as Parameters<typeof c.json>[1]);
+    res = c.json(
+      { success: false, error: { code: err.code, message: err.message, details: err.details } },
+      err.status as Parameters<typeof c.json>[1],
+    );
+  } else {
+    res = c.json({ success: false, error: { code: "internal_error", message: "Internal server error" } }, 500);
   }
-  return c.json({ success: false, error: { code: "internal_error", message: "Internal server error" } }, 500);
+  applySecurityHeaders(c);
+  return res;
+});
+
+// Apply to all successful responses and harden caching of the HTML shell.
+app.use("*", async (c, next) => {
+  await next();
+  applySecurityHeaders(c);
+  const ct = c.res.headers.get("content-type") || "";
+  // The SPA shell carries no user data, but an auth app's root document must
+  // never be served from a shared cache unvalidated. Pin it to private/no-cache
+  // so Cloudflare (and any intermediary) revalidates instead of caching it.
+  if (ct.includes("text/html")) {
+    c.header("Cache-Control", "private, no-cache");
+  }
 });
 
 // Set JWT secret + seed admin at startup of each isolate (idempotent).
