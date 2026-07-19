@@ -4,29 +4,31 @@
 //   WJW_DEV_URL=http://127.0.0.1:8787 node scripts/qa-walkthrough.mjs   # local sandbox
 //   WJW_DEV_URL=https://app.wildjazminewellness.ca node scripts/qa-walkthrough.mjs  # live
 //
-// Auth: the local/dev app seeds its admin via /api/v1/bootstrap/provision
-// (one-time random password, force_reset). This harness bootstraps that admin
-// automatically so the authed walkthrough actually runs — mimicking a human who
-// completes first-login setup. For prod (bootstrap disabled) it falls back to
-// .dev-admin.txt / WJW_EMAIL + WJW_PASSWORD.
+// Auth (dev/sandbox): the app's sendEmail() writes to a dev mail sink
+// (email_outbox) instead of delivering. This harness reads that sink to pull
+// the password-reset link and sets a KNOWN dev password — so login always
+// works without a real inbox and without the un-recoverable one-time bootstrap
+// password. Production (bootstrap disabled, real mail) falls back to static
+// creds from .dev-admin.txt / WJW_EMAIL + WJW_PASSWORD.
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve } from 'path';
 
 const BASE = process.env.WJW_DEV_URL || 'http://127.0.0.1:8787';
 const BOOTSTRAP_TOKEN = process.env.WJW_BOOTSTRAP_TOKEN || 'local-dev-only-bootstrap-replace-in-prod';
 
-// Known admin password (from .dev-admin.txt if present, else env). Used as the
-// stable post-bootstrap password so the session isn't force-reset mid-walk.
-let EMAIL = process.env.WJW_EMAIL || '';
+// Admin identity (from .dev-admin.txt if present, else env).
+let EMAIL = process.env.WJW_EMAIL || 'loki.bein.blodsson@gmail.com';
 let PASSWORD = process.env.WJW_PASSWORD || '';
 try {
   const txt = readFileSync(new URL('../.dev-admin.txt', import.meta.url), 'utf8');
   const e = txt.match(/email:\s*(\S+)/); const p = txt.match(/password:\s*(\S+)/);
   if (e) EMAIL = e[1];
   if (p) PASSWORD = p[1];
-} catch {}
-if (!EMAIL || !PASSWORD) { console.error('No admin creds. Set WJW_EMAIL/WJW_PASSWORD or .dev-admin.txt'); process.exit(1); }
+} catch { }
+if (!EMAIL) { console.error('No admin email. Set WJW_EMAIL or .dev-admin.txt'); process.exit(1); }
+// Dev password we will force the account to via the reset flow.
+const DEV_PW = PASSWORD || 'WjwDev!2026';
 
 const out = [];
 const log = (...a) => { const s = a.join(' '); out.push(s); console.log(s); };
@@ -41,16 +43,48 @@ const pageErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => pageErrors.push(e.message));
 
-// Bootstrap the dev admin (returns a one-time password if it just created one).
-async function bootstrapAdmin() {
+// API calls run server-side (Node fetch) — avoids CORS (the SPA origin is
+// null inside a blank page) and matches how an operator/tool would hit the API.
+
+// Ensure the dev admin exists (bootstrap, dev only). We don't rely on the
+// one-time temp password — we overwrite it via the reset flow below.
+async function ensureAdmin() {
+  await fetch(BASE + '/api/v1/bootstrap/provision', {
+    method: 'POST', headers: { 'x-bootstrap-token': BOOTSTRAP_TOKEN },
+  }).catch(() => {});
+}
+
+// In dev, sendEmail() writes to email_outbox instead of sending. We read that
+// sink (via the dev-only endpoint) to pull the password-reset link — no real
+// inbox needed. Returns the reset token or null (e.g. on prod where it's 403).
+async function readResetTokenFromSink() {
   try {
-    const r = await page.evaluate(async (b, t) => {
-      const res = await fetch(b + '/api/v1/bootstrap/provision', { method: 'POST', headers: { 'x-bootstrap-token': t } });
-      return { status: res.status, body: await res.json().catch(() => ({})) };
-    }, BASE, BOOTSTRAP_TOKEN);
-    if (r.body?.data?.temporary_password) return r.body.data.temporary_password;
-  } catch { /* bootstrap unavailable (e.g. prod) — fall back to static creds */ }
-  return null;
+    const res = await fetch(BASE + '/api/v1/dev/email-outbox');
+    if (!res.ok) return null;
+    const j = await res.json().catch(() => ({}));
+    const rows = (j.data || []).filter((x) => x.to_addr === EMAIL || /reset/i.test(x.subject || ''));
+    const body = rows[0]?.body || '';
+    const m = body.match(/\/reset\?token=([A-Za-z0-9_-]+)/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
+// Set a KNOWN dev password via the reset flow so we never depend on the
+// un-recoverable one-time bootstrap password. Also clears any lockout
+// (reset-password zeroes failed_logins + locked_until).
+async function setKnownPassword() {
+  const r = await fetch(BASE + '/api/v1/auth/request-password-reset', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: EMAIL }),
+  });
+  if (!r.ok) throw new Error('request-password-reset failed (' + r.status + ')');
+  const token = await readResetTokenFromSink();
+  if (!token) throw new Error('could not read reset token from dev mail sink');
+  const ok = await fetch(BASE + '/api/v1/auth/reset-password', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token, password: DEV_PW }),
+  });
+  if (!ok.ok) throw new Error('reset-password failed (' + ok.status + ')');
 }
 
 const ROUTES = [
@@ -67,9 +101,16 @@ const ROUTES = [
 ];
 
 try {
-  // ── Bootstrap (dev only) ──
-  const tempPw = await bootstrapAdmin();
-  const loginPw = tempPw || PASSWORD;
+  // ── Establish a known dev password (sink-based, dev only) ──
+  let loginPw = PASSWORD;
+  try {
+    await ensureAdmin();
+    await setKnownPassword();
+    loginPw = DEV_PW;
+    log(`dev login armed via mail-sink reset (email=${EMAIL})`);
+  } catch (e) {
+    log('dev mail-sink login unavailable (' + e.message + ') — using static creds');
+  }
 
   // ── Login ──
   await page.goto(BASE + '/login', { waitUntil: 'networkidle', timeout: 30000 });
@@ -83,16 +124,11 @@ try {
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(2000);
 
-  // ── Handle forced first-login password reset (bootstrap path) ──
-  let onReset = page.url().includes('/change-password');
-  if (!onReset) {
-    const newPw = page.locator('input[autocomplete="new-password"], input[name="new_password"]');
-    onReset = (await newPw.count()) > 0;
-  }
-  if (onReset) {
+  // Safety net: if still forced to reset, set it to the known dev password.
+  if (page.url().includes('/change-password')) {
     const fields = page.locator('input[type="password"]');
     const n = await fields.count();
-    for (let i = 0; i < n; i++) await fields.nth(i).fill(PASSWORD);
+    for (let i = 0; i < n; i++) await fields.nth(i).fill(loginPw);
     await page.getByRole('button', { name: /(set|change|update|save|confirm|submit).*password/i }).click().catch(() => {});
     await page.waitForTimeout(2000);
   }

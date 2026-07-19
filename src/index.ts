@@ -234,6 +234,18 @@ app.post("/api/v1/bootstrap/provision", async (c) => {
   );
 });
 
+// Dev-only mail sink inspector. In dev, sendEmail() records every outbound
+// message in email_outbox (no real SMTP). This endpoint lets the QA harness
+// (and a human) complete reset/invite/verify flows without a real inbox.
+// Hard-guarded: returns 403 in production, so it can never leak mail on prod.
+app.get("/api/v1/dev/email-outbox", async (c) => {
+  if (IS_PRODUCTION(c.env)) return jsonError(Errors.forbidden("dev-only endpoint"));
+  const rows = await c.env.DB.prepare(
+    `SELECT id, to_addr, subject, body, created_at FROM email_outbox ORDER BY created_at DESC LIMIT 25`
+  ).all();
+  return json({ ok: true, data: (rows as { results: unknown[] }).results ?? [] });
+});
+
 // Mount feature routes.
 app.route("/api/v1/auth", authRoutes);
 app.route("/api/v1/board", boardRoutes);
