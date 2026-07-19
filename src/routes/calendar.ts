@@ -29,6 +29,14 @@ async function me(db: D1DatabaseLike, c: any) {
   }
 }
 
+// Index: bare GET /api/v1/calendar must require auth like its siblings
+// (/month, /cards) and return 401, not fall through to a 404 not_found.
+calendar.get("/", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  return json({ ok: true, data: { message: "Use /calendar/month or /calendar/cards" } });
+});
+
 // Month view: year + month (1-12). Returns events grouped by YYYY-MM-DD.
 calendar.get("/month", async (c) => {
   const user = await me(c.env.DB, c);

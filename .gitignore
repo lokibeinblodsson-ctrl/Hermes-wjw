@@ -32,3 +32,4 @@ logs/
 
 # wrangler deploy output
 .wrangler-deploy/
+.dev-admin.txt
