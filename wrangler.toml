@@ -42,7 +42,8 @@ crons = ["7 9 * * *"]
 #   wrangler secret put JWT_SECRET      # strong random; required in prod
 #   wrangler secret put BOOTSTRAP_TOKEN # rotate; dev-only anyway
 #   wrangler secret put ADMIN_EMAIL
-#   wrangler secret put ENVIRONMENT     # value: production
+#   wrangler secret put BREVO_API_KEY   # preferred free email (300/day, no CC)
+#   wrangler secret put MAILCHANNELS_TOKEN  # legacy fallback (now needs CC)
 #   wrangler secret put MAILCHANNELS_TOKEN
 #   wrangler secret put B2_KEY_ID
 #   wrangler secret put B2_APP_KEY

@@ -15,6 +15,15 @@ export interface Env {
   BOOTSTRAP_TOKEN?: string;
   JWT_SECRET?: string;
   MAILCHANNELS_TOKEN?: string;
+  // Email delivery (provider-optional, all free / no credit card):
+  // - BREVO_API_KEY: preferred. Brevo free tier (300 emails/day, no CC).
+  //   Set via `wrangler secret put BREVO_API_KEY`.
+  // - MAILJET_API_KEY + MAILJET_SECRET_KEY: backup. Mailjet free tier
+  //   (200 emails/day, no CC). Both required; set via wrangler secret put.
+  //   When Brevo is unset, Mailjet is used automatically. See src/lib/email.ts.
+  BREVO_API_KEY?: string;
+  MAILJET_API_KEY?: string;
+  MAILJET_SECRET_KEY?: string;
   SITE_NAME?: string;
   ENVIRONMENT?: string;
   // Image storage (Item 3): prefer Backblaze B2 (no CC), else R2 binding, else inline.
