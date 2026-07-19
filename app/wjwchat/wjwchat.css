@@ -76,3 +76,46 @@ mark {
 .composer-input {
   resize: none;
 }
+
+/* Hermes "thinking" typing indicator */
+.dot-flashing {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9cb881;
+  animation: dot-flashing 1s infinite linear alternate;
+  display: inline-block;
+}
+.dot-flashing::before,
+.dot-flashing::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9cb881;
+  animation: dot-flashing 1s infinite linear alternate;
+}
+.dot-flashing::before { left: 10px; animation-delay: 0.33s; }
+.dot-flashing::after { left: 20px; animation-delay: 0.66s; }
+@keyframes dot-flashing {
+  0% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+
+/* Chat top nav — uses the host .topnav styles; this just tints the Hermes link */
+.chat-topnav .nav-hermes {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--moss);
+}
+.chat-topnav .nav-hermes.on {
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.chat-topnav .nav-hermes:hover {
+  color: var(--accent-soft);
+}

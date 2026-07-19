@@ -23,6 +23,7 @@ export interface Channel {
   section: string; // e.g. "Teams", "Projects"
   muted?: boolean;
   memberCount: number;
+  isAssistant?: boolean; // the special Hermes assistant channel
 }
 
 export interface DirectMessage {
@@ -73,6 +74,9 @@ export interface Message {
   deliveryStatus: DeliveryStatus;
   // true for seeded messages that have already been "read" on first load
   seeded?: boolean;
+  // Hermes assistant message flags
+  isHermesThinking?: boolean;
+  hermesOffline?: boolean;
 }
 
 export interface Notification {

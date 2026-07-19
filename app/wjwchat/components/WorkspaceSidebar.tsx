@@ -10,15 +10,15 @@ import {
   PanelLeftClose,
   PanelLeft,
   Settings2,
-  PenSquare,
   VolumeX,
   Volume2,
+  Sparkles,
 } from "lucide-react";
 import { useChat } from "../store";
 import { workspace, users } from "../seed";
 import { UserAvatar } from "./UserAvatar";
 import { getUser, isSelf } from "../utils";
-import type { Channel, DirectMessage } from "../types";
+import type { Channel } from "../types";
 
 export function WorkspaceSidebar() {
   const conversations = useChat((s) => s.conversations);
@@ -43,11 +43,11 @@ export function WorkspaceSidebar() {
   const [newDesc, setNewDesc] = useState("");
 
   const channels = useMemo(
-    () => conversations.filter((c): c is Channel => c.kind === "channel"),
+    () => conversations.filter((c): c is Channel => c.kind === "channel" && !c.isAssistant),
     [conversations]
   );
-  const dms = useMemo(
-    () => conversations.filter((c): c is DirectMessage => c.kind === "dm"),
+  const hermesChannel = useMemo(
+    () => conversations.find((c): c is Channel => c.kind === "channel" && !!c.isAssistant),
     [conversations]
   );
 
@@ -206,49 +206,29 @@ export function WorkspaceSidebar() {
             </div>
           ))}
 
-        {/* DMs */}
-        <SectionHeader
-          label="Direct messages"
-          open={dmsOpen}
-          onToggle={() => setDmsOpen((v) => !v)}
-          action={
-            <button
-              className="rounded p-1 text-slate-400 hover:bg-ink-800 hover:text-white"
-              title="New message"
-              aria-label="New message"
-            >
-              <PenSquare size={15} />
-            </button>
-          }
-        />
-        {dmsOpen &&
-          dms.map((dm) => {
-            const u = getUser(dm.userId);
-            return (
-              <button
-                key={dm.id}
-                onClick={() => setActive(dm.id)}
-                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-ink-800 ${
-                  primaryView === "home" && activeId === dm.id ? "bg-ink-800 text-white" : "text-slate-300"
-                }`}
-              >
-                <UserAvatar name={u.name} color={u.avatarColor} size={22} presence={u.presence} />
-                <span className="flex-1 truncate">{u.name}</span>
-                {unreadCounts[dm.id] ? (
-                  <span className="rounded-full bg-clay px-1.5 text-[11px] font-semibold text-ink-950">
-                    {unreadCounts[dm.id]}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+        {/* Hermes assistant */}
+        <SectionHeader label="Assistant" open onToggle={() => {}} />
+        {hermesChannel && (
+          <button
+            onClick={() => setActive(hermesChannel.id)}
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-ink-800 ${
+              primaryView === "home" && activeId === hermesChannel.id ? "bg-ink-800 text-white" : "text-slate-300"
+            }`}
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-moss/20 text-moss-soft">
+              <Sparkles size={13} />
+            </span>
+            <span className="flex-1 truncate">{hermesChannel.name}</span>
+          </button>
+        )}
+
+        {/* self footer */}
+        <SelfFooter onOpenMenu={() => setMenuOpen(true)} />
       </div>
 
-      {/* self footer */}
-      <SelfFooter onOpenMenu={() => setMenuOpen(true)} />
-    </nav>
-  );
-}
+      </nav>
+    );
+  }
 
 function SelfFooter({ onOpenMenu }: { onOpenMenu: () => void }) {
   const me = users.find((u) => isSelf(u.id))!;

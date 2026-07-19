@@ -15,7 +15,11 @@ import {
   seedNotifications,
   conversations as seedConversations,
   CURRENT_USER_ID,
+  CURRENT_USER_ROLE,
 } from "./seed";
+import { askHermes, streamText } from "./hermesClient";
+
+export const HERMES_CHANNEL_ID = "chn_hermes";
 
 // Conversations live in static seed (no add/remove for now); new channels can
 // be created at runtime so we keep a mutable copy in state.
@@ -42,6 +46,7 @@ interface ChatState {
   threadPanelMessageId: string | null; // message whose thread is open
   searchOpen: boolean;
   menuOpen: boolean;
+  hermesConvId: string | null; // server conversation id for the Hermes channel
 
   // per-conversation persisted state
   drafts: DraftMap;
@@ -60,10 +65,15 @@ interface ChatState {
 
   setDraft: (conversationId: string, text: string) => void;
   sendMessage: (conversationId: string, text: string) => Promise<void>;
+  sendHermesMessage: (text: string) => Promise<void>;
   retryMessage: (messageId: string) => Promise<void>;
   editMessage: (messageId: string, text: string) => void;
   toggleReaction: (messageId: string, emoji: string) => void;
   toggleSave: (messageId: string) => void;
+  deleteMessage: (messageId: string) => void;
+  deleteChannel: (id: string) => void;
+  canDeleteMessage: (m: Message) => boolean;
+  canModerate: () => boolean;
   sendThreadReply: (messageId: string, text: string) => Promise<void>;
 
   createChannel: (name: string, section: string, description?: string) => void;
@@ -109,6 +119,7 @@ export const useChat = create<ChatState>()(
       threadPanelMessageId: null,
       searchOpen: false,
       menuOpen: false,
+      hermesConvId: null,
 
       drafts: {},
       readState: {},
@@ -150,6 +161,68 @@ export const useChat = create<ChatState>()(
         set((s) => ({
           messages: s.messages.map((m) =>
             m.id === id ? { ...m, deliveryStatus: failed ? "failed" : "sent" } : m
+          ),
+        }));
+      },
+
+      // Send a message in the Hermes assistant channel: posts to the real
+      // /hermes/chat API, shows a "thinking" bubble, then streams the reply.
+      sendHermesMessage: async (text) => {
+        const channelId = HERMES_CHANNEL_ID;
+        const userMsg: Message = {
+          id: newId("msg"),
+          conversationId: channelId,
+          senderId: get().currentUserId,
+          text,
+          createdAt: new Date().toISOString(),
+          reactions: [],
+          replyCount: 0,
+          deliveryStatus: "sent",
+        };
+        const thinkingId = newId("msg");
+        set((s) => ({
+          messages: [
+            ...s.messages,
+            userMsg,
+            {
+              id: thinkingId,
+              conversationId: channelId,
+              senderId: "usr_hermes",
+              text: "…",
+              createdAt: new Date().toISOString(),
+              reactions: [],
+              replyCount: 0,
+              deliveryStatus: "sending",
+              isHermesThinking: true,
+            },
+          ],
+          drafts: { ...s.drafts, [channelId]: "" },
+        }));
+
+        const res = await askHermes(text, get().hermesConvId || undefined);
+        if (res.conversationId) set({ hermesConvId: res.conversationId });
+
+        // simulate a short "typing" stream for a calmer feel
+        const streamed = streamText(res.reply);
+        for (const chunk of streamed) {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === thinkingId ? { ...m, text: chunk } : m
+            ),
+          }));
+          await wait(18);
+        }
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === thinkingId
+              ? {
+                  ...m,
+                  text: res.reply,
+                  deliveryStatus: "sent",
+                  isHermesThinking: false,
+                  hermesOffline: !!res.offline,
+                }
+              : m
           ),
         }));
       },
@@ -205,6 +278,44 @@ export const useChat = create<ChatState>()(
             m.id === messageId ? { ...m, isSaved: !m.isSaved } : m
           ),
         })),
+
+      // Admins & moderators can delete ANY user-made object; authors can delete
+      // their own. The Hermes bot's messages can't be deleted by users.
+      canModerate: () => ["admin", "moderator"].includes(CURRENT_USER_ROLE),
+      canDeleteMessage: (m: Message) =>
+        m.senderId === "usr_hermes"
+          ? false
+          : m.senderId === get().currentUserId || ["admin", "moderator"].includes(CURRENT_USER_ROLE),
+      deleteMessage: (messageId) => {
+        const m = get().messages.find((x) => x.id === messageId);
+        if (!m) return;
+        if (!(["admin", "moderator"].includes(CURRENT_USER_ROLE) || m.senderId === get().currentUserId)) return;
+        if (m.senderId === "usr_hermes") return;
+        set((s) => ({
+          messages: s.messages.filter((x) => x.id !== messageId),
+          threadReplies: (() => {
+            const { [messageId]: _drop, ...rest } = s.threadReplies;
+            return rest;
+          })(),
+          threadPanelMessageId: s.threadPanelMessageId === messageId ? null : s.threadPanelMessageId,
+        }));
+      },
+      deleteChannel: (id) => {
+        if (!["admin", "moderator"].includes(CURRENT_USER_ROLE)) return;
+        set((s) => ({
+          conversations: s.conversations.filter((c) => c.id !== id),
+          messages: s.messages.filter((m) => m.conversationId !== id),
+          threadReplies: (() => {
+            const next = { ...s.threadReplies };
+            for (const k of Object.keys(next)) {
+              const root = s.messages.find((m) => m.id === k);
+              if (root && root.conversationId === id) delete next[k];
+            }
+            return next;
+          })(),
+          activeConversationId: s.activeConversationId === id ? "chn_general" : s.activeConversationId,
+        }));
+      },
 
       sendThreadReply: async (messageId, text) => {
         const reply: ThreadReply = {

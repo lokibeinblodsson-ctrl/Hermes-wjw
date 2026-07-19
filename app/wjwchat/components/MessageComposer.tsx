@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Smile, Paperclip, AtSign, Send, X } from "lucide-react";
-import { useChat } from "../store";
+import { Smile, Paperclip, AtSign, Send, X, Sparkles } from "lucide-react";
+import { useChat, HERMES_CHANNEL_ID } from "../store";
 import { users } from "../seed";
 import type { Conversation } from "../types";
 
@@ -16,6 +16,7 @@ export function MessageComposer({
   const draft = useChat((s) => s.drafts[conv.id] || "");
   const setDraft = useChat((s) => s.setDraft);
   const sendMessage = useChat((s) => s.sendMessage);
+  const sendHermesMessage = useChat((s) => s.sendHermesMessage);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -31,7 +32,11 @@ export function MessageComposer({
   const send = () => {
     const text = draft.trim();
     if (!text) return;
-    sendMessage(conv.id, text);
+    if (conv.id === HERMES_CHANNEL_ID) {
+      sendHermesMessage(text);
+    } else {
+      sendMessage(conv.id, text);
+    }
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -113,7 +118,7 @@ export function MessageComposer({
                 Mention
               </div>
               {users
-                .filter((u) => u.id !== useChat.getState().currentUserId)
+                .filter((u) => u.id !== "usr_hermes" && u.id !== useChat.getState().currentUserId)
                 .map((u) => (
                   <button
                     key={u.id}
