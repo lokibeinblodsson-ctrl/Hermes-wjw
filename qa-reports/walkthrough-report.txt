@@ -1,0 +1,20 @@
+dev login armed via mail-sink reset (email=loki.bein.blodsson@gmail.com)
+PASS  login page loads
+PASS  login form has email+password
+PASS  login succeeded (redirected off /login) — http://127.0.0.1:8787/
+PASS  page Board (Kanban) (/) renders — len=639
+PASS  page Card hub (/card) renders — len=639
+PASS  page Chat (/chat) renders — len=389
+PASS  page Calendar (/calendar) renders — len=1058
+PASS  page Memory (/memory) renders — len=615
+PASS  page Docs (/docs) renders — len=2849
+PASS  page Activity (/activity) renders — len=1039
+PASS  page Admin (/admin) renders — len=647
+PASS  page Files (/files) renders — len=638
+PASS  page Publishing pipeline (/publish) renders — len=432
+PASS  command palette opens on Ctrl+K
+PASS  logout returns to login — http://127.0.0.1:8787/login
+
+SUMMARY: 15 passed, 0 failed
+CONSOLE ERRORS: 0 app-level, 0 cloudflare-3rd-party/bot-challenge (benign from datacenter IP)
+PAGE ERRORS: 0

@@ -99,6 +99,23 @@ chat.patch("/threads/:id", async (c) => {
   return json({ ok: true });
 });
 
+// Delete a thread (and its messages, via ON DELETE CASCADE).
+// Author of the thread may delete their own; admins/moderators may delete any.
+chat.delete("/threads/:id", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare(`SELECT id, author_id FROM threads WHERE id = ?`).bind(id).first();
+  if (!row) return jsonError(Errors.notFound("Thread not found"));
+  const t = row as any;
+  const isOwner = t.author_id && t.author_id === user.id;
+  const isMod = user.role === "admin" || user.role === "moderator";
+  if (!isOwner && !isMod) return jsonError(Errors.forbidden("You can only delete your own threads"));
+  await c.env.DB.prepare(`DELETE FROM threads WHERE id = ?`).bind(id).run();
+  await logAudit(c.env.DB, { actorId: user.id, action: "thread_deleted", targetType: "thread", targetId: id });
+  return json({ ok: true });
+});
+
 // ── Messages (threaded replies) ──────────────────────────────────────────
 chat.get("/messages", async (c) => {
   const user = await me(c.env.DB, c);

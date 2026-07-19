@@ -92,6 +92,15 @@ export default function ChatPage() {
   async function toggleLock(t: Thread) {
     try { await api.patch(`/chat/threads/${t.id}`, { locked: !t.locked }); const res = await api.get(`/chat/threads?channel_id=${activeChannel}`); setThreads(res.data); } catch (e: any) { setError(e.message); }
   }
+  async function deleteThread(t: Thread) {
+    if (!confirm(`Delete conversation "${t.title}" and all its messages? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/chat/threads/${t.id}`);
+      const res = await api.get(`/chat/threads?channel_id=${activeChannel}`);
+      setThreads(res.data);
+      if (activeThread === t.id) { setActiveThread(res.data.length ? res.data[0].id : ""); setMessages([]); }
+    } catch (e: any) { setError(e.message); }
+  }
   async function deleteMessage(m: Message) {
     if (!confirm("Delete message?")) return;
     try { await api.delete(`/chat/messages/${m.id}`); const res = await api.get(`/chat/messages?thread_id=${activeThread}`); setMessages(res.data); } catch (e: any) { setError(e.message); }
@@ -117,10 +126,11 @@ export default function ChatPage() {
           {threads.map((t) => (
             <div key={t.id} className={`thread-item ${t.id === activeThread ? "active" : ""}`} onClick={() => setActiveThread(t.id)}>
               <span>{t.pinned ? "📌 " : ""}{t.title}</span>
-              {canModerate && (
+              {(canModerate || t.author_id === user?.id) && (
                 <span className="thread-mod">
-                  <button onClick={(e) => { e.stopPropagation(); togglePin(t); }}>pin</button>
-                  <button onClick={(e) => { e.stopPropagation(); toggleLock(t); }}>{t.locked ? "unlock" : "lock"}</button>
+                  {canModerate && <button onClick={(e) => { e.stopPropagation(); togglePin(t); }}>pin</button>}
+                  {canModerate && <button onClick={(e) => { e.stopPropagation(); toggleLock(t); }}>{t.locked ? "unlock" : "lock"}</button>}
+                  <button className="danger" onClick={(e) => { e.stopPropagation(); deleteThread(t); }}>delete</button>
                 </span>
               )}
             </div>

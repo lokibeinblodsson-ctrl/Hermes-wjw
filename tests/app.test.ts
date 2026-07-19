@@ -794,6 +794,33 @@ describe("Phase 3: chat board", () => {
     const m = await api("POST", "/api/v1/chat/messages", { thread_id: threadId, body: "nope" }, token);
     expect(m.status).toBe(403);
   });
+
+  it("lets the author delete their own thread and cascade-deletes its messages", async () => {
+    const t = await api("POST", "/api/v1/chat/threads", { channel_id: channelId, title: "Delete me" }, token);
+    expect(t.status).toBe(201);
+    const threadId = t.data.data.id;
+    const m = await api("POST", "/api/v1/chat/messages", { thread_id: threadId, body: "first" }, token);
+    expect(m.status).toBe(201);
+    const del = await api("DELETE", `/api/v1/chat/threads/${threadId}`, undefined, token);
+    expect(del.status).toBe(200);
+    // thread gone from list
+    const list = await api("GET", `/api/v1/chat/threads?channel_id=${channelId}`, undefined, token);
+    expect(list.data.data.some((x: any) => x.id === threadId)).toBe(false);
+    // messages cascade-deleted
+    const msgs = await api("GET", `/api/v1/chat/messages?thread_id=${threadId}`, undefined, token);
+    expect(msgs.data.data.length).toBe(0);
+  });
+
+  it("forbids a non-author member from deleting someone else's thread", async () => {
+    const t = await api("POST", "/api/v1/chat/threads", { channel_id: channelId, title: "Owned by admin" }, token);
+    const threadId = t.data.data.id;
+    const member = await makeMember();
+    const del = await api("DELETE", `/api/v1/chat/threads/${threadId}`, undefined, member.token);
+    expect(del.status).toBe(403);
+    // thread still present
+    const list = await api("GET", `/api/v1/chat/threads?channel_id=${channelId}`, undefined, token);
+    expect(list.data.data.some((x: any) => x.id === threadId)).toBe(true);
+  });
 });
 
 describe("Phase 4: admin — users, tasks, audit, flags", () => {
