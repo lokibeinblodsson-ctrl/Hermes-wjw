@@ -5,28 +5,31 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Muted-indigo workspace sidebar palette (WJW Chat)
+        // Mapped to the site's calm dark palette in app/styles.css so the chat
+        // mirrors the rest of the web app exactly.
         ink: {
-          950: "#15131f",
-          900: "#1c1929",
-          850: "#221e31",
-          800: "#2a2540",
-          700: "#352f4d",
-          600: "#473f63",
+          950: "#121512", // --bg
+          900: "#1c221c", // --panel
+          850: "#212821", // between panel and panel-2
+          800: "#252c25", // --panel-2
+          700: "#2f372f", // hover surface
+          600: "#3a443a",
         },
-        moss: { DEFAULT: "#6f8f7d", soft: "#8aa897" },
-        clay: { DEFAULT: "#cf9f8f", soft: "#e0bcaf" },
-        // light conversation surface
-        surface: { DEFAULT: "#f7f6f3", raised: "#ffffff", sunken: "#efece6" },
-        line: "#e3dfd6",
-        slate: { DEFAULT: "#3c3a44", muted: "#6b6878" },
+        moss: { DEFAULT: "#8aa66f", soft: "#9cb881" }, // --accent / --accent-2
+        clay: { DEFAULT: "#cf9f8f", soft: "#e0bcaf" }, // --clay (warm accent)
+        warn: { DEFAULT: "#d8b878" }, // --warn (amber)
+        danger: { DEFAULT: "#d29292" }, // --danger (clay-red)
+        // conversation surface (dark, matching the site)
+        surface: { DEFAULT: "#1c221c", raised: "#252c25", sunken: "#161a16" },
+        line: "#333d33", // --border
+        slate: { DEFAULT: "#dde4dc", muted: "#8a9a88" }, // --text / --muted
       },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       boxShadow: {
-        panel: "0 1px 2px rgba(20,18,31,0.06), 0 8px 24px rgba(20,18,31,0.08)",
-        pop: "0 10px 40px rgba(20,18,31,0.18)",
+        panel: "0 1px 2px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.25)",
+        pop: "0 10px 40px rgba(0,0,0,0.4)",
       },
       keyframes: {
         "fade-in": { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
