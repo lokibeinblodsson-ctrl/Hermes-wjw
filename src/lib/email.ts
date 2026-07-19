@@ -1,12 +1,14 @@
 // Email service. In dev/test it writes to the email_outbox table (a local sink) —
-// no real SMTP credentials are used. In production, if MAILCHANNELS_TOKEN is set,
-// it delivers via Cloudflare MailChannels (token stored as a secret, never in code).
+// no real SMTP credentials are used. When a mail provider token is set (e.g.
+// MAILCHANNELS_TOKEN), it delivers; otherwise the message stays in the outbox
+// and the operator forwards the link from the Admin "Mail Queue" tab. Fully
+// free path: no card, no DNS, no third-party account required.
 import type { D1Database } from "@cloudflare/workers-types";
 import { randomId, nowIso } from "../lib/crypto";
 import type { Env } from "../lib/env";
 
-// Must be on a domain you verify in MailChannels (your CF zone domain), or
-// delivery is rejected. Keep this aligned with wildjazminewellness.ca.
+// Used as the From address only when a real provider is configured. Keep this
+// aligned with a domain you control (your CF zone domain).
 const SYSTEM_FROM = "no-reply@wildjazminewellness.ca";
 
 export async function sendEmail(

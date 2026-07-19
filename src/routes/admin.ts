@@ -245,6 +245,24 @@ admin.put("/settings/:key", async (c) => {
   return json({ ok: true });
 });
 
+// ── Email outbox (no external provider needed) ─────────────────────────────
+// When no mail provider is configured, reset/invite/verify links are written
+// here instead of being delivered. The operator can copy the link and forward
+// it from their own inbox — fully free, no card, no DNS.
+admin.get("/email-outbox", async (c) => {
+  const limit = Math.min(200, parseInt(new URL(c.req.url).searchParams.get("limit") || "50"));
+  const rs = await c.env.DB.prepare(
+    `SELECT id, to_addr, subject, body, created_at, sent_at FROM email_outbox ORDER BY created_at DESC LIMIT ?`
+  ).bind(limit).all();
+  const rows = (rs.results as any[]) || [];
+  // Extract the first http(s) link from the body so the operator can copy it.
+  const withLinks = rows.map((r) => ({
+    ...r,
+    link: (r.body.match(/https?:\/\/[^\s"<]+/) || [null])[0],
+  }));
+  return json({ ok: true, data: withLinks });
+});
+
 // ── Email verification admin control ──────────────────────────────────────
 admin.get("/email-verification", async (c) => {
   const rs = await c.env.DB.prepare(

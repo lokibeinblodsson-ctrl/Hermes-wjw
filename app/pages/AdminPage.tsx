@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../App";
 import DataPage from "./DataPage";
 
-type Tab = "users" | "tasks" | "categories" | "audit" | "analytics" | "flags" | "settings" | "data";
+type Tab = "users" | "tasks" | "categories" | "audit" | "analytics" | "flags" | "settings" | "data" | "mail";
 
 export default function AdminPage() {
   const { user } = useAuth();
@@ -23,6 +23,7 @@ export default function AdminPage() {
         {(["users", "tasks", "categories", "audit", "analytics", "flags", "settings"] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? "active" : ""} onClick={() => { setTab(t); setError(""); }}>{t}</button>
         ))}
+        <button className={tab === "mail" ? "active" : ""} onClick={() => { setTab("mail"); setError(""); }}>mail queue</button>
         {(user?.role === "admin" || user?.role === "moderator") && (
           <button className={tab === "data" ? "active" : ""} onClick={() => { setTab("data"); setError(""); }}>data</button>
         )}
@@ -36,6 +37,7 @@ export default function AdminPage() {
       {tab === "flags" && <FlagsTab setError={setError} />}
       {tab === "settings" && <SettingsTab setError={setError} />}
       {tab === "data" && <DataPage />}
+      {tab === "mail" && <MailQueueTab setError={setError} />}
     </div>
   );
 }
@@ -123,6 +125,57 @@ function UsersTab({ setError }: { setError: (s: string) => void }) {
               </td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Mail Queue (no external provider needed) ───────────────────────────────
+// Shows every reset/invite/verify email the system generated. Since no mail
+// provider is configured, the operator copies the link and forwards it from
+// their own inbox. Fully free: no card, no DNS, no third-party account.
+function MailQueueTab({ setError }: { setError: (s: string) => void }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const reload = useReload();
+
+  async function load() {
+    try { const r = await api.get("/admin/email-outbox?limit=100"); setRows(r.data); }
+    catch (e: any) { setError(e.message); }
+  }
+  useEffect(() => { load(); }, [reload]);
+
+  async function copy(text: string) {
+    try { await navigator.clipboard.writeText(text); } catch { /* clipboard may be blocked; ignore */ }
+  }
+
+  return (
+    <div>
+      <p className="muted">
+        These are outgoing emails the system generated (password resets, invites, verifications).
+        No mail provider is configured, so they aren't auto-sent — copy a link and forward it from your own inbox.
+      </p>
+      <table className="data-table small">
+        <thead><tr><th>Time</th><th>To</th><th>Subject</th><th>Magic link</th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td>{new Date(r.created_at).toLocaleString()}</td>
+              <td>{r.to_addr}</td>
+              <td>{r.subject}</td>
+              <td>
+                {r.link ? (
+                  <span>
+                    <a href={r.link} target="_blank" rel="noreferrer">{r.link}</a>{" "}
+                    <button className="btn-link" onClick={() => copy(r.link)}>copy</button>
+                  </span>
+                ) : (
+                  <span className="muted">no link</span>
+                )}
+              </td>
+            </tr>
+          ))}
+          {rows.length === 0 && <tr><td colSpan={4} className="muted">No queued mail yet.</td></tr>}
         </tbody>
       </table>
     </div>
