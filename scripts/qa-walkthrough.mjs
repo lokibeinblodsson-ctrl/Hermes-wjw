@@ -1,13 +1,23 @@
-// Host-side authenticated QA walkthrough of the LOCAL wrangler dev app.
-// Drives the real Playwright Chromium against http://127.0.0.1:8787.
-// Usage: node scripts/qa-walkthrough.mjs
+// Host-side authenticated QA walkthrough of the WJW app.
+// Drives a real Playwright Chromium (just like a human would) against a target.
+// Usage:
+//   WJW_DEV_URL=http://127.0.0.1:8787 node scripts/qa-walkthrough.mjs   # local sandbox
+//   WJW_DEV_URL=https://app.wildjazminewellness.ca node scripts/qa-walkthrough.mjs  # live
+//
+// Auth: the local/dev app seeds its admin via /api/v1/bootstrap/provision
+// (one-time random password, force_reset). This harness bootstraps that admin
+// automatically so the authed walkthrough actually runs — mimicking a human who
+// completes first-login setup. For prod (bootstrap disabled) it falls back to
+// .dev-admin.txt / WJW_EMAIL + WJW_PASSWORD.
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 const BASE = process.env.WJW_DEV_URL || 'http://127.0.0.1:8787';
+const BOOTSTRAP_TOKEN = process.env.WJW_BOOTSTRAP_TOKEN || 'local-dev-only-bootstrap-replace-in-prod';
 
-// Dev-admin (local only). From .dev-admin.txt if present, else env.
+// Known admin password (from .dev-admin.txt if present, else env). Used as the
+// stable post-bootstrap password so the session isn't force-reset mid-walk.
 let EMAIL = process.env.WJW_EMAIL || '';
 let PASSWORD = process.env.WJW_PASSWORD || '';
 try {
@@ -16,7 +26,7 @@ try {
   if (e) EMAIL = e[1];
   if (p) PASSWORD = p[1];
 } catch {}
-if (!EMAIL || !PASSWORD) { console.error('No dev-admin creds. Set WJW_EMAIL/WJW_PASSWORD or .dev-admin.txt'); process.exit(1); }
+if (!EMAIL || !PASSWORD) { console.error('No admin creds. Set WJW_EMAIL/WJW_PASSWORD or .dev-admin.txt'); process.exit(1); }
 
 const out = [];
 const log = (...a) => { const s = a.join(' '); out.push(s); console.log(s); };
@@ -30,6 +40,18 @@ const consoleErrors = [];
 const pageErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => pageErrors.push(e.message));
+
+// Bootstrap the dev admin (returns a one-time password if it just created one).
+async function bootstrapAdmin() {
+  try {
+    const r = await page.evaluate(async (b, t) => {
+      const res = await fetch(b + '/api/v1/bootstrap/provision', { method: 'POST', headers: { 'x-bootstrap-token': t } });
+      return { status: res.status, body: await res.json().catch(() => ({})) };
+    }, BASE, BOOTSTRAP_TOKEN);
+    if (r.body?.data?.temporary_password) return r.body.data.temporary_password;
+  } catch { /* bootstrap unavailable (e.g. prod) — fall back to static creds */ }
+  return null;
+}
 
 const ROUTES = [
   ['/', 'Board (Kanban)'],
@@ -45,6 +67,10 @@ const ROUTES = [
 ];
 
 try {
+  // ── Bootstrap (dev only) ──
+  const tempPw = await bootstrapAdmin();
+  const loginPw = tempPw || PASSWORD;
+
   // ── Login ──
   await page.goto(BASE + '/login', { waitUntil: 'networkidle', timeout: 30000 });
   check('login page loads', (await page.title()).toLowerCase().includes('wild jazmine'));
@@ -52,10 +78,25 @@ try {
   const pwField = page.locator('input[type="password"]');
   check('login form has email+password', (await emailField.count()) === 1 && (await pwField.count()) === 1);
   await emailField.fill(EMAIL);
-  await pwField.fill(PASSWORD);
+  await pwField.fill(loginPw);
   await page.getByRole('button', { name: /sign in|log in/i }).click();
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(2000);
+
+  // ── Handle forced first-login password reset (bootstrap path) ──
+  let onReset = page.url().includes('/change-password');
+  if (!onReset) {
+    const newPw = page.locator('input[autocomplete="new-password"], input[name="new_password"]');
+    onReset = (await newPw.count()) > 0;
+  }
+  if (onReset) {
+    const fields = page.locator('input[type="password"]');
+    const n = await fields.count();
+    for (let i = 0; i < n; i++) await fields.nth(i).fill(PASSWORD);
+    await page.getByRole('button', { name: /(set|change|update|save|confirm|submit).*password/i }).click().catch(() => {});
+    await page.waitForTimeout(2000);
+  }
+
   const afterLogin = page.url();
   const authed = !afterLogin.includes('/login');
   check('login succeeded (redirected off /login)', authed, afterLogin);
@@ -98,13 +139,14 @@ try {
   const passed = results.filter((r) => r.ok).length;
   const failed = results.filter((r) => !r.ok).length;
   log(`\nSUMMARY: ${passed} passed, ${failed} failed`);
-  const cf = consoleErrors.filter((e) => /cloudflareinsights|beacon|static\.cloudflare/i.test(e)).length;
-  log('CONSOLE ERRORS: ' + (consoleErrors.length - cf) + ' app-level, ' + cf + ' cloudflare-3rd-party (benign)');
-  consoleErrors.filter((e) => !/cloudflareinsights|beacon|static\.cloudflare/i.test(e)).slice(0, 12).forEach((e) => log('  CE: ' + e.slice(0, 200)));
+  const cf = consoleErrors.filter((e) => /cloudflareinsights|beacon|static\.cloudflare|challenge-platform|cdn-cgi/i.test(e)).length;
+  log('CONSOLE ERRORS: ' + (consoleErrors.length - cf) + ' app-level, ' + cf + ' cloudflare-3rd-party/bot-challenge (benign from datacenter IP)');
+  consoleErrors.filter((e) => !/cloudflareinsights|beacon|static\.cloudflare|challenge-platform|cdn-cgi/i.test(e)).slice(0, 12).forEach((e) => log('  CE: ' + e.slice(0, 200)));
   log('PAGE ERRORS: ' + pageErrors.length);
   pageErrors.slice(0, 12).forEach((e) => log('  PE: ' + e.slice(0, 200)));
-  const reportDir = process.env.QA_REPORT_DIR || '../qa-reports';
+  const reportDir = process.env.QA_REPORT_DIR || 'qa-reports';
+  mkdirSync(reportDir, { recursive: true });
   const reportPath = resolve(reportDir, 'walkthrough-report.txt');
   writeFileSync(reportPath, out.join('\n') + '\n');
-  log('\nReport written to: ' + reportPath.pathname);
+  log('\nReport written to: ' + reportPath);
 }
