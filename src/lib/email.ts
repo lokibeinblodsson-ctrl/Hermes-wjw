@@ -5,7 +5,9 @@ import type { D1Database } from "@cloudflare/workers-types";
 import { randomId, nowIso } from "../lib/crypto";
 import type { Env } from "../lib/env";
 
-const SYSTEM_FROM = "no-reply@wildjazmine.app";
+// Must be on a domain you verify in MailChannels (your CF zone domain), or
+// delivery is rejected. Keep this aligned with wildjazminewellness.ca.
+const SYSTEM_FROM = "no-reply@wildjazminewellness.ca";
 
 export async function sendEmail(
   env: Env,
