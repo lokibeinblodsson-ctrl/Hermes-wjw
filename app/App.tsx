@@ -148,8 +148,9 @@ export default function App() {
   }
 
   // WJW Chat is a full-screen, self-contained experience — render it outside
-  // the standard top-nav shell when on its route.
-  if (location.pathname.startsWith("/chat2")) {
+  // the standard top-nav shell when on its route. It is the canonical chat page
+  // (replaces the old community ChatPage) and includes the right-side thread panel.
+  if (location.pathname.startsWith("/chat") || location.pathname.startsWith("/chat2")) {
     return (
       <Ctx.Provider value={{ user, setUser, logout, refresh }}>
         <WjwChatApp />
@@ -165,7 +166,6 @@ export default function App() {
           <div className="nav-links">
             <Link to="/">Board</Link>
             <Link to="/chat">Chat</Link>
-            <Link to="/chat2">WJW Chat</Link>
             <Link to="/calendar">Calendar</Link>
             <Link to="/memory">Memory</Link>
             <Link to="/docs">Docs</Link>
@@ -185,7 +185,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<KanbanPage />} />
             <Route path="/card/:id" element={<CardWorkspacePage />} />
-            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat" element={<WjwChatApp />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/memory" element={<MemoryPage />} />
             <Route path="/docs" element={<DocsPage />} />
