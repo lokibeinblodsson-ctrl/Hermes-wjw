@@ -135,6 +135,42 @@ export function canViewPrivateMessages(user: Actor | null): boolean {
   return roleAtLeast(user, "admin");
 }
 
+// ── Channel access ───────────────────────────────────────────────────────────
+// Access to a channel is evaluated from three inputs so there is ONE rule used
+// by every chat endpoint (list, threads, messages, post). Fails closed.
+//
+//   channel.is_private === false  -> any active user may read & post.
+//   channel.is_private === true   -> allowed IFF the user's role is in
+//                                    allowed_roles OR the user has an explicit
+//                                    channel_members row (isMember).
+//
+// This closes the prior IDOR where thread/message reads had no privacy check,
+// and adds per-user grants without widening whole roles. Managing a channel
+// (create/rename/set members/moderate) remains moderator+ as before.
+export interface ChannelAccessInput {
+  is_private: boolean;
+  allowed_roles: Role[];
+  isMember: boolean; // has an explicit channel_members row
+}
+
+export function canReadChannel(user: Actor | null, ch: ChannelAccessInput): boolean {
+  if (!isActive(user)) return false;
+  if (!ch.is_private) return true;
+  if (ch.allowed_roles.includes(user!.role)) return true;
+  return ch.isMember;
+}
+
+// Posting (threads / messages) uses the same gate as reading. Thread-lock and
+// ownership checks remain the endpoint's responsibility.
+export function canPostInChannel(user: Actor | null, ch: ChannelAccessInput): boolean {
+  return canReadChannel(user, ch);
+}
+
+// Create channels, edit channel settings, and manage a channel's member list.
+export function canManageChannel(user: Actor | null): boolean {
+  return roleAtLeast(user, "moderator");
+}
+
 // Website planning edits (own): same rule as editing one's own card.
 export function canEditWebsitePlanning(user: Actor | null, card?: { created_by: string | null }): boolean {
   return canEditCard(user, card);

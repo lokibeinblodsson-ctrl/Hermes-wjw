@@ -3,9 +3,10 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../App";
 
-interface Channel { id: string; name: string; description: string; is_private: number; }
+interface Channel { id: string; name: string; description: string; is_private: number; allowed_roles: string[]; }
 interface Thread { id: string; channel_id: string; title: string; author_id: string; pinned: number; locked: number; }
 interface Message { id: string; thread_id: string; parent_id: string | null; author_name: string; author_role: string; body: string; mentions: string[]; created_at: string; edited_at: string | null; }
+interface ChannelMember { id: string; user_id: string; display_name: string; email: string; role: string; }
 
 export default function ChatPage() {
   const { user } = useAuth();

@@ -9,6 +9,8 @@ import { randomId, nowIso, toJson, jsonField } from "../lib/crypto";
 import { resolveSession } from "../db/users";
 import { logAudit, logAnalytics } from "../db/logging";
 import { ensureDefaults } from "../bootstrap";
+import { canReadChannel, canManageChannel, type ChannelAccessInput } from "../lib/permissions";
+import { isChannelMember, memberChannelIds, listChannelMembers, addChannelMember, removeChannelMember } from "../db/channelMembers";
 
 const chat = new Hono<{ Bindings: Env }>();
 type D1DatabaseLike = import("@cloudflare/workers-types").D1Database;
@@ -25,6 +27,39 @@ async function me(db: D1DatabaseLike, c: any): Promise<ReturnType<typeof resolve
   }
 }
 
+// Load the access facts for a channel and evaluate them against the user via
+// the single permission rule. Returns { ok, channel } so callers can 403/404
+// consistently. This is the ONE gate every chat read/write goes through — it
+// closes the prior IDOR where thread/message reads had no privacy check.
+async function channelAccess(
+  db: D1DatabaseLike,
+  channelId: string,
+  user: { id: string; role: any } | null
+): Promise<{ ok: boolean; found: boolean; channel: any }> {
+  const ch = await db.prepare(`SELECT * FROM channels WHERE id = ?`).bind(channelId).first();
+  if (!ch) return { ok: false, found: false, channel: null };
+  const row = ch as any;
+  const access: ChannelAccessInput = {
+    is_private: !!row.is_private,
+    allowed_roles: jsonField(row.allowed_roles_json, []) as any[],
+    isMember: user ? await isChannelMember(db as any, channelId, user.id) : false,
+  };
+  return { ok: canReadChannel(user as any, access), found: true, channel: row };
+}
+
+// Same gate, resolved from a thread id (messages are thread-scoped). Returns
+// the thread row too so callers can check lock/ownership without re-querying.
+async function threadAccess(
+  db: D1DatabaseLike,
+  threadId: string,
+  user: { id: string; role: any } | null
+): Promise<{ ok: boolean; found: boolean; thread: any; channel: any }> {
+  const t = await db.prepare(`SELECT * FROM threads WHERE id = ?`).bind(threadId).first();
+  if (!t) return { ok: false, found: false, thread: null, channel: null };
+  const acc = await channelAccess(db, (t as any).channel_id, user);
+  return { ok: acc.ok, found: true, thread: t, channel: acc.channel };
+}
+
 // ── Channels ─────────────────────────────────────────────────────────────
 chat.get("/channels", async (c) => {
   await ensureDefaults(c.env.DB);
@@ -35,8 +70,14 @@ chat.get("/channels", async (c) => {
     ...r,
     allowed_roles: jsonField(r.allowed_roles_json, []),
   }));
-  // filter private channels by role
-  const visible = channels.filter((ch) => !ch.is_private || (ch.allowed_roles as string[]).includes(user.role));
+  // Visible = public, OR private-and-role-allowed, OR private-and-explicit-member.
+  // Per-user membership widens visibility beyond role without leaking others.
+  const memberOf = await memberChannelIds(c.env.DB, user.id);
+  const visible = channels.filter((ch) =>
+    !ch.is_private ||
+    (ch.allowed_roles as string[]).includes(user.role) ||
+    memberOf.has(ch.id)
+  );
   return json({ ok: true, data: visible });
 });
 
@@ -62,6 +103,9 @@ chat.get("/threads", async (c) => {
   if (!user) return jsonError(Errors.unauthorized());
   const channelId = new URL(c.req.url).searchParams.get("channel_id");
   if (!channelId) return jsonError(Errors.badRequest("channel_id required"));
+  const acc = await channelAccess(c.env.DB, channelId, user);
+  if (!acc.found) return jsonError(Errors.notFound("Channel not found"));
+  if (!acc.ok) return jsonError(Errors.forbidden("Not allowed in this channel"));
   const rs = await c.env.DB.prepare(`SELECT * FROM threads WHERE channel_id = ? ORDER BY pinned DESC, updated_at DESC`).bind(channelId).all();
   return json({ ok: true, data: rs.results || [] });
 });
@@ -70,12 +114,9 @@ chat.post("/threads", zValidator("json", threadCreateSchema), async (c) => {
   const user = await me(c.env.DB, c);
   if (!user) return jsonError(Errors.unauthorized());
   const body = await c.req.json();
-  const ch = await c.env.DB.prepare(`SELECT * FROM channels WHERE id = ?`).bind(body.channel_id).first();
-  if (!ch) return jsonError(Errors.notFound("Channel not found"));
-  const chRow = ch as any;
-  if (chRow.is_private && !(jsonField(chRow.allowed_roles_json, []) as string[]).includes(user.role)) {
-    return jsonError(Errors.forbidden("Not allowed in this channel"));
-  }
+  const acc = await channelAccess(c.env.DB, body.channel_id, user);
+  if (!acc.found) return jsonError(Errors.notFound("Channel not found"));
+  if (!acc.ok) return jsonError(Errors.forbidden("Not allowed in this channel"));
   const id = randomId("thr");
   await c.env.DB.prepare(`INSERT INTO threads (id, channel_id, title, author_id, pinned, locked, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0, ?, ?)`)
     .bind(id, body.channel_id, body.title, user.id, nowIso(), nowIso()).run();
@@ -122,6 +163,9 @@ chat.get("/messages", async (c) => {
   if (!user) return jsonError(Errors.unauthorized());
   const threadId = new URL(c.req.url).searchParams.get("thread_id");
   if (!threadId) return jsonError(Errors.badRequest("thread_id required"));
+  const acc = await threadAccess(c.env.DB, threadId, user);
+  if (!acc.found) return jsonError(Errors.notFound("Thread not found"));
+  if (!acc.ok) return jsonError(Errors.forbidden("Not allowed in this channel"));
   const rs = await c.env.DB.prepare(
     `SELECT m.*, u.display_name as author_name, u.role as author_role
      FROM messages m LEFT JOIN users u ON u.id = m.author_id
@@ -135,9 +179,10 @@ chat.post("/messages", zValidator("json", messageCreateSchema), async (c) => {
   const user = await me(c.env.DB, c);
   if (!user) return jsonError(Errors.unauthorized());
   const body = await c.req.json();
-  const thread = await c.env.DB.prepare(`SELECT * FROM threads WHERE id = ?`).bind(body.thread_id).first();
-  if (!thread) return jsonError(Errors.notFound("Thread not found"));
-  const t = thread as any;
+  const acc = await threadAccess(c.env.DB, body.thread_id, user);
+  if (!acc.found) return jsonError(Errors.notFound("Thread not found"));
+  if (!acc.ok) return jsonError(Errors.forbidden("Not allowed in this channel"));
+  const t = acc.thread as any;
   if (t.locked) return jsonError(Errors.forbidden("Thread is locked"));
   if (body.parent_id) {
     const parent = await c.env.DB.prepare(`SELECT id FROM messages WHERE id = ? AND thread_id = ?`).bind(body.parent_id, body.thread_id).first();
@@ -185,6 +230,47 @@ chat.delete("/messages/:id", async (c) => {
   await c.env.DB.prepare(`UPDATE messages SET deleted_at = ?, body = '[deleted]', updated_at = ? WHERE id = ?`)
     .bind(nowIso(), nowIso(), id).run();
   await logAudit(c.env.DB, { actorId: user.id, action: "message_deleted", targetType: "message", targetId: id });
+  return json({ ok: true });
+});
+
+// ── Channel membership management (moderator+) ────────────────────────────
+// Grant/revoke a specific user's access to a (private) channel without changing
+// their global role. Every change is audited. Reads require canManageChannel.
+chat.get("/channels/:id/members", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  if (!canManageChannel(user)) return jsonError(Errors.forbidden());
+  const channelId = c.req.param("id");
+  const ch = await c.env.DB.prepare(`SELECT id FROM channels WHERE id = ?`).bind(channelId).first();
+  if (!ch) return jsonError(Errors.notFound("Channel not found"));
+  const members = await listChannelMembers(c.env.DB, channelId);
+  return json({ ok: true, data: members.map((m) => ({ ...m, password_hash: undefined })) });
+});
+
+chat.post("/channels/:id/members", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  if (!canManageChannel(user)) return jsonError(Errors.forbidden());
+  const channelId = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  if (!body.user_id || typeof body.user_id !== "string") return jsonError(Errors.badRequest("user_id required"));
+  const ch = await c.env.DB.prepare(`SELECT id FROM channels WHERE id = ?`).bind(channelId).first();
+  if (!ch) return jsonError(Errors.notFound("Channel not found"));
+  const target = await c.env.DB.prepare(`SELECT id FROM users WHERE id = ?`).bind(body.user_id).first();
+  if (!target) return jsonError(Errors.notFound("User not found"));
+  await addChannelMember(c.env.DB, channelId, body.user_id, user.id);
+  await logAudit(c.env.DB, { actorId: user.id, action: "channel_member_added", targetType: "channel", targetId: channelId, meta: { user_id: body.user_id } });
+  return json({ ok: true }, 201);
+});
+
+chat.delete("/channels/:id/members/:userId", async (c) => {
+  const user = await me(c.env.DB, c);
+  if (!user) return jsonError(Errors.unauthorized());
+  if (!canManageChannel(user)) return jsonError(Errors.forbidden());
+  const channelId = c.req.param("id");
+  const targetId = c.req.param("userId");
+  await removeChannelMember(c.env.DB, channelId, targetId);
+  await logAudit(c.env.DB, { actorId: user.id, action: "channel_member_removed", targetType: "channel", targetId: channelId, meta: { user_id: targetId } });
   return json({ ok: true });
 });
 

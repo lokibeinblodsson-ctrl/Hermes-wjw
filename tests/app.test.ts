@@ -167,6 +167,19 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_cards_column ON cards(column_id, position);
+CREATE TABLE IF NOT EXISTS channel_members (
+  id TEXT PRIMARY KEY,
+  channel_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  added_by TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE (channel_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_channel_members_channel ON channel_members(channel_id);
+CREATE INDEX IF NOT EXISTS idx_channel_members_user ON channel_members(user_id);
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
   actor_id TEXT,
@@ -414,6 +427,7 @@ beforeAll(async () => {
 const TABLES = [
   "memory_fts", "memory_notes", "email_outbox", "settings", "feature_flags",
   "analytics_events", "audit_logs", "messages", "threads", "channels",
+  "channel_members",
   "task_history", "tasks", "cards", "board_columns", "categories",
   "password_resets", "email_verifications", "users",
   "content_items", "publish_events",
@@ -806,9 +820,9 @@ describe("Phase 3: chat board", () => {
     // thread gone from list
     const list = await api("GET", `/api/v1/chat/threads?channel_id=${channelId}`, undefined, token);
     expect(list.data.data.some((x: any) => x.id === threadId)).toBe(false);
-    // messages cascade-deleted
+    // messages cascade-deleted: reading the dead thread now 404s (strict)
     const msgs = await api("GET", `/api/v1/chat/messages?thread_id=${threadId}`, undefined, token);
-    expect(msgs.data.data.length).toBe(0);
+    expect(msgs.status).toBe(404);
   });
 
   it("forbids a non-author member from deleting someone else's thread", async () => {
@@ -820,6 +834,132 @@ describe("Phase 3: chat board", () => {
     // thread still present
     const list = await api("GET", `/api/v1/chat/threads?channel_id=${channelId}`, undefined, token);
     expect(list.data.data.some((x: any) => x.id === threadId)).toBe(true);
+  });
+});
+
+describe("Phase 3b: channel access control (RBAC + per-user membership)", () => {
+  let adminToken: string;
+  let adminId: string;
+
+  // Create a private channel restricted to a single role, returning its id.
+  async function makePrivateChannel(allowedRoles: string[]): Promise<string> {
+    const name = `priv-${randomToken(4).toLowerCase()}`;
+    const r = await api("POST", "/api/v1/chat/channels", {
+      name, description: "", is_private: true, allowed_roles: allowedRoles,
+    }, adminToken);
+    expect(r.status).toBe(201);
+    return r.data.data.id;
+  }
+
+  beforeAll(async () => {
+    await clearDb();
+    const a = await makeAdmin();
+    adminToken = a.token;
+    adminId = a.id;
+  });
+
+  it("hides private channels from users who lack role and membership", async () => {
+    await makePrivateChannel(["admin"]);
+    const member = await makeMember();
+    const list = await api("GET", "/api/v1/chat/channels", undefined, member.token);
+    expect(list.status).toBe(200);
+    expect(list.data.data.some((ch: any) => ch.is_private)).toBe(false);
+  });
+
+  it("BLOCKS reading threads in a private channel by id (IDOR fix)", async () => {
+    const chId = await makePrivateChannel(["admin"]);
+    // admin creates a thread in the private channel
+    const t = await api("POST", "/api/v1/chat/threads", { channel_id: chId, title: "secret" }, adminToken);
+    expect(t.status).toBe(201);
+    // a plain member who knows the channel id must NOT read its threads
+    const member = await makeMember();
+    const threads = await api("GET", `/api/v1/chat/threads?channel_id=${chId}`, undefined, member.token);
+    expect(threads.status).toBe(403);
+  });
+
+  it("BLOCKS reading messages in a private thread by id (IDOR fix)", async () => {
+    const chId = await makePrivateChannel(["admin"]);
+    const t = await api("POST", "/api/v1/chat/threads", { channel_id: chId, title: "secret2" }, adminToken);
+    const threadId = t.data.data.id;
+    await api("POST", "/api/v1/chat/messages", { thread_id: threadId, body: "classified" }, adminToken);
+    const member = await makeMember();
+    const msgs = await api("GET", `/api/v1/chat/messages?thread_id=${threadId}`, undefined, member.token);
+    expect(msgs.status).toBe(403);
+  });
+
+  it("BLOCKS posting a thread/message in a private channel without access", async () => {
+    const chId = await makePrivateChannel(["admin"]);
+    const member = await makeMember();
+    const t = await api("POST", "/api/v1/chat/threads", { channel_id: chId, title: "intrusion" }, member.token);
+    expect(t.status).toBe(403);
+  });
+
+  it("GRANTS access via per-user channel membership without changing role", async () => {
+    const chId = await makePrivateChannel(["admin"]);
+    const t = await api("POST", "/api/v1/chat/threads", { channel_id: chId, title: "shared" }, adminToken);
+    const threadId = t.data.data.id;
+
+    // member is invited to the specific user via the DB user id
+    const memberEmail = `guest_${randomToken(6)}@test.local`;
+    const hash = await hashPassword("Pass#abcd1234");
+    const memberId = randomId("usr");
+    await env.DB.prepare(
+      `INSERT INTO users (id,email,display_name,password_hash,role,status,email_verified,force_reset,token_version,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(memberId, memberEmail, "Guest", hash, "member", "active", 1, 0, 0, nowIso(), nowIso()).run();
+    const login = await api("POST", "/api/v1/auth/login", { email: memberEmail, password: "Pass#abcd1234" });
+    const memberToken = login.data.data.token;
+
+    // before grant: blocked
+    const before = await api("GET", `/api/v1/chat/threads?channel_id=${chId}`, undefined, memberToken);
+    expect(before.status).toBe(403);
+
+    // grant membership
+    const add = await api("POST", `/api/v1/chat/channels/${chId}/members`, { user_id: memberId }, adminToken);
+    expect(add.status).toBe(201);
+
+    // after grant: channel now visible + threads/messages readable
+    const list = await api("GET", "/api/v1/chat/channels", undefined, memberToken);
+    expect(list.data.data.some((ch: any) => ch.id === chId)).toBe(true);
+    const after = await api("GET", `/api/v1/chat/threads?channel_id=${chId}`, undefined, memberToken);
+    expect(after.status).toBe(200);
+    const msgs = await api("GET", `/api/v1/chat/messages?thread_id=${threadId}`, undefined, memberToken);
+    expect(msgs.status).toBe(200);
+
+    // revoke: access removed again
+    const del = await api("DELETE", `/api/v1/chat/channels/${chId}/members/${memberId}`, undefined, adminToken);
+    expect(del.status).toBe(200);
+    const revoked = await api("GET", `/api/v1/chat/threads?channel_id=${chId}`, undefined, memberToken);
+    expect(revoked.status).toBe(403);
+  });
+
+  it("forbids non-moderators from managing channel members", async () => {
+    const chId = await makePrivateChannel(["admin"]);
+    const member = await makeMember();
+    const r = await api("POST", `/api/v1/chat/channels/${chId}/members`, { user_id: adminId }, member.token);
+    expect(r.status).toBe(403);
+  });
+
+  it("still allows public channels for everyone (backward compatible)", async () => {
+    const member = await makeMember();
+    const list = await api("GET", "/api/v1/chat/channels", undefined, member.token);
+    expect(list.status).toBe(200);
+    // the seeded default channels are public and must remain visible
+    expect(list.data.data.length).toBeGreaterThan(0);
+  });
+
+  it("audits channel membership grant and revoke", async () => {
+    const chId = await makePrivateChannel(["admin"]);
+    const member = await makeMember();
+    // need the member's id — look it up via admin users list
+    const users = await api("GET", "/api/v1/admin/users", undefined, adminToken);
+    const target = users.data.data.find((u: any) => u.role === "member");
+    await api("POST", `/api/v1/chat/channels/${chId}/members`, { user_id: target.id }, adminToken);
+    await api("DELETE", `/api/v1/chat/channels/${chId}/members/${target.id}`, undefined, adminToken);
+    const audit = await api("GET", "/api/v1/admin/audit", undefined, adminToken);
+    const actions = audit.data.data.map((a: any) => a.action);
+    expect(actions).toContain("channel_member_added");
+    expect(actions).toContain("channel_member_removed");
   });
 });
 
