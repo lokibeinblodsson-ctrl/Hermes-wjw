@@ -16,6 +16,7 @@ import ActivityPage from "./pages/ActivityPage";
 import HermesChatDock from "./components/HermesChatDock";
 import CommandPalette from "./components/CommandPalette";
 import PasswordField from "./components/PasswordField";
+import { WjwChatApp } from "./wjwchat";
 import { PALETTE_OPEN_EVENT, PALETTE_TOGGLE_EVENT, PALETTE_CLOSE_EVENT } from "./lib/commandBus";
 
 interface AuthCtx {
@@ -37,6 +38,7 @@ export default function App() {
   const [hermesOpen, setHermesOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Allow any page to open/toggle the Hermes dock (e.g. board toolbar button).
   useEffect(() => {
@@ -145,6 +147,16 @@ export default function App() {
     );
   }
 
+  // WJW Chat is a full-screen, self-contained experience — render it outside
+  // the standard top-nav shell when on its route.
+  if (location.pathname.startsWith("/chat2")) {
+    return (
+      <Ctx.Provider value={{ user, setUser, logout, refresh }}>
+        <WjwChatApp />
+      </Ctx.Provider>
+    );
+  }
+
   return (
     <Ctx.Provider value={{ user, setUser, logout, refresh }}>
       <div className="app-shell">
@@ -153,6 +165,7 @@ export default function App() {
           <div className="nav-links">
             <Link to="/">Board</Link>
             <Link to="/chat">Chat</Link>
+            <Link to="/chat2">WJW Chat</Link>
             <Link to="/calendar">Calendar</Link>
             <Link to="/memory">Memory</Link>
             <Link to="/docs">Docs</Link>
@@ -177,6 +190,7 @@ export default function App() {
             <Route path="/memory" element={<MemoryPage />} />
             <Route path="/docs" element={<DocsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
+            <Route path="/chat2" element={<WjwChatApp />} />
             <Route path="/files" element={<FilesPage />} />
             {user.role === "admin" || user.role === "moderator" || user.role === "reviewer" ? (
               <Route path="/publish" element={<PublishingPage />} />

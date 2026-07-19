@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* WJW Chat custom rules (coexist with the host app's styles.css) */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* visible focus for keyboard users */
+:focus-visible {
+  outline: 2px solid #6f8f7d;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* message text rendering */
+.msg-link {
+  color: #6f8f7d;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+.dark .msg-link {
+  color: #8aa897;
+}
+.mention {
+  color: #7c6f8f;
+  background: rgba(124, 111, 143, 0.12);
+  border-radius: 4px;
+  padding: 0 3px;
+  font-weight: 500;
+}
+.inline-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(60, 58, 68, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+}
+.dark .inline-code {
+  background: rgba(255, 255, 255, 0.08);
+}
+mark {
+  background: #f3e2b0;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.dark mark {
+  background: #6f5f33;
+}
+
+/* thin scrollbars */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 115, 140, 0.4) transparent;
+}
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(120, 115, 140, 0.35);
+  border-radius: 8px;
+}
+
+/* composer textarea no resize */
+.composer-input {
+  resize: none;
+}
