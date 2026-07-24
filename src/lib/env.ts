@@ -44,6 +44,18 @@ export interface Env {
   OPENROUTER_API_KEY?: string;
   CEREBRAS_API_KEY?: string;
   MISTRAL_API_KEY?: string;
+  // Self-hosted Hermes agent on deb12 (https://hermes.wildjazminewellness.ca,
+  // reached via Cloudflare tunnel). Used as the assistant brain (chat) and as
+  // the external research provider for AI Kanban research. Set at least one
+  // auth path via `wrangler secret put`:
+  //   HERMES_AGENT_TOKEN  — preferred: a static bearer token accepted by the agent.
+  //   HERMES_AGENT_USER + HERMES_AGENT_PASS — password login (session token cached).
+  // Without these, chat falls back to the free providers above and external
+  // research stays a safe no-op. HERMES_AGENT_URL overrides the default host.
+  HERMES_AGENT_URL?: string;
+  HERMES_AGENT_TOKEN?: string;
+  HERMES_AGENT_USER?: string;
+  HERMES_AGENT_PASS?: string;
 }
 
 export const IS_PRODUCTION = (env?: Env): boolean =>

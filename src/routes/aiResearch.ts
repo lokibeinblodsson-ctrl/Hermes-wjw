@@ -38,6 +38,17 @@ import {
 import { makeInternalRetrieval, makeExternalResearch, internalRetrievalProvider } from "../lib/aiResearch/researchProvider";
 import { computeEmbedding, cosineSimilarity } from "../lib/memory/embeddings";
 import { safeJson } from "../lib/aiResearch/safeJson";
+import { runHermesAgentResearch, type AgentResearchSource } from "../lib/hermesAgent";
+
+// Resolve the external research implementation. When allow_external_research
+// is on AND a deb12 Hermes credential is configured (HERMES_AGENT_TOKEN or
+// user/pass secrets), route external research to the self-hosted agent.
+// Otherwise external research stays a safe no-op (returns []), never fabricates.
+function resolveExternalImpl(env: Env, allowed: boolean): ((query: string, questions: string[]) => Promise<AgentResearchSource[]>) | undefined {
+  if (!allowed) return undefined;
+  if (!env.HERMES_AGENT_TOKEN && !(env.HERMES_AGENT_USER && env.HERMES_AGENT_PASS)) return undefined;
+  return (query: string, questions: string[]) => runHermesAgentResearch(env, query, questions);
+}
 
 const ai = new Hono<{ Bindings: Env }>();
 type D1DatabaseLike = import("@cloudflare/workers-types").D1Database;
@@ -85,7 +96,7 @@ ai.post("/cards/:id/research", zValidator("json", z.object({ trigger: z.enum(["c
   const runId = await createRun(c.env.DB, cardId, body.trigger || "manual", hash, {}, cfg?.config_json ? safeJson(cfg.config_json, {}) : {}, user.id);
   // Run synchronously (no queue in WJW yet; structured so a queue could call
   // runResearch later). Status transitions: queued -> running -> completed/...
-  const result = await runResearch(c.env.DB, { runId, cardId, card, user, cfg, externalImpl: undefined });
+  const result = await runResearch(c.env.DB, { runId, cardId, card, user, cfg, externalImpl: resolveExternalImpl(c.env, !!cfg?.allow_external_research) });
   return json({ ok: true, data: result }, 201);
 });
 
@@ -98,7 +109,7 @@ ai.post("/cards/:id/research/rerun", async (c) => {
   const cfg = await getResearchConfig(c.env.DB, "workspace", null);
   if (await activeRunForCard(c.env.DB, cardId)) return jsonError(Errors.conflict("A research run is already active for this card"));
   const runId = await createRun(c.env.DB, cardId, "rerun", cardContentHash(card), {}, cfg?.config_json ? safeJson(cfg.config_json, {}) : {}, user.id);
-  const result = await runResearch(c.env.DB, { runId, cardId, card, user, cfg, externalImpl: undefined });
+  const result = await runResearch(c.env.DB, { runId, cardId, card, user, cfg, externalImpl: resolveExternalImpl(c.env, !!cfg?.allow_external_research) });
   return json({ ok: true, data: result }, 201);
 });
 

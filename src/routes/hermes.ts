@@ -44,6 +44,7 @@ import {
 import { runLlmChain, type FreeModelMap, type LlmMessage } from "../lib/llm";
 import { buildTools, buildSystemPrompt } from "../lib/hermesLlm";
 import { runModelWatchdog } from "../lib/modelWatchdog";
+import { runHermesAgentChat } from "../lib/hermesAgent";
 
 // Import the REAL route apps so we forward to their exact handlers — one write
 // path, one permission check. (Each already enforces permissions.ts on its own.)
@@ -209,7 +210,10 @@ hermes.post("/chat", zValidator("json", sendSchema), async (c) => {
   ).bind(conversationId).all();
   const history = ((histRs.results as any[]) || []).map((m) => ({ role: m.role, body: m.body }));
 
-  // Try the free-provider LLM chain; fall back to the rule-based responder.
+  // Try the self-hosted Hermes agent on deb12 FIRST (preferred brain). If it
+  // answers, use its text. On any failure it returns null and we fall through
+  // to the free-provider LLM chain, then finally the rule-based responder — so
+  // the assistant is never fully dead.
   let reply = "";
   let usedProvider = "rule-based";
   let usedModel = "";
@@ -232,20 +236,30 @@ hermes.post("/chat", zValidator("json", sendSchema), async (c) => {
     { role: "user", content: message },
   ];
 
-  const llm = await runLlmChain(c.env, map, llmMessages, buildTools());
-  if (llm.provider !== "none") {
-    usedProvider = llm.provider;
-    usedModel = llm.model;
-    reply = llm.text;
-    if (llm.action && HERMES_ALLOWED_ACTIONS.includes(llm.action.action as HermesAction)) {
-      proposedAction = { action: llm.action.action, params: llm.action.params };
-      if (!reply) {
-        reply = `I can ${HERMES_ACTION_LABELS[llm.action.action as HermesAction].toLowerCase()} for you — confirm below to proceed.`;
-      }
-    }
+  const deb = await runHermesAgentChat(c.env, llmMessages, sys, 25000);
+  if (deb?.text) {
+    usedProvider = deb.provider; // "hermes-deb12"
+    usedModel = deb.model; // "deb12"
+    reply = deb.text;
+    // Note: deb12 does not emit OpenAI tool_calls, so action proposals come
+    // only from the free-LLM chain below (when deb12 is unavailable). This is a
+    // known limitation; conversational answers are the priority.
   } else {
-    // All providers failed/absent — safe rule-based fallback (never fully dead).
-    reply = await respond(message, context);
+    const llm = await runLlmChain(c.env, map, llmMessages, buildTools());
+    if (llm.provider !== "none") {
+      usedProvider = llm.provider;
+      usedModel = llm.model;
+      reply = llm.text;
+      if (llm.action && HERMES_ALLOWED_ACTIONS.includes(llm.action.action as HermesAction)) {
+        proposedAction = { action: llm.action.action, params: llm.action.params };
+        if (!reply) {
+          reply = `I can ${HERMES_ACTION_LABELS[llm.action.action as HermesAction].toLowerCase()} for you — confirm below to proceed.`;
+        }
+      }
+    } else {
+      // All providers failed/absent — safe rule-based fallback (never fully dead).
+      reply = await respond(message, context);
+    }
   }
 
   // Persist the USER message first (so history shows the full conversation),
