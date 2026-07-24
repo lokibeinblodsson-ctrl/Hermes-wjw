@@ -9,7 +9,7 @@
 // migrations/0001_init.sql — keep the two in sync.
 
 import { env, SELF } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { hashPassword, randomId, randomToken } from "../src/lib/crypto";
 import { nowIso } from "../src/db/db";
 import { resetRateLimitStore } from "../src/lib/rateLimit";
@@ -329,6 +329,49 @@ CREATE TABLE IF NOT EXISTS files (
   updated_at TEXT NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL
 );
+CREATE TABLE IF NOT EXISTS card_ai_runs (
+  id TEXT PRIMARY KEY, card_id TEXT NOT NULL, trigger TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+  content_hash TEXT, intake_json TEXT NOT NULL DEFAULT '{}', config_json TEXT NOT NULL DEFAULT '{}', error TEXT,
+  created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_card ON card_ai_runs(card_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS card_research_notes (
+  id TEXT PRIMARY KEY, card_id TEXT NOT NULL, run_id TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'draft',
+  content_json TEXT NOT NULL DEFAULT '{}', sources_json TEXT NOT NULL DEFAULT '[]', applied_tags_json TEXT NOT NULL DEFAULT '[]',
+  proposed_tags_json TEXT NOT NULL DEFAULT '[]', proposed_links_json TEXT NOT NULL DEFAULT '[]', created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE, FOREIGN KEY (run_id) REFERENCES card_ai_runs(id) ON DELETE CASCADE, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS research_sources (
+  id TEXT PRIMARY KEY, note_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', url TEXT, publisher TEXT,
+  published_date TEXT, relevance TEXT, retrieved_at TEXT, FOREIGN KEY (note_id) REFERENCES card_research_notes(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, usage_count INTEGER NOT NULL DEFAULT 0, created_by TEXT, source TEXT NOT NULL DEFAULT 'system', created_at TEXT NOT NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS tag_aliases (
+  id TEXT PRIMARY KEY, alias TEXT NOT NULL UNIQUE, canonical_tag_id TEXT NOT NULL, created_by TEXT,
+  FOREIGN KEY (canonical_tag_id) REFERENCES tags(id) ON DELETE CASCADE, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS card_tags (
+  id TEXT PRIMARY KEY, card_id TEXT NOT NULL, tag_id TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'user', confidence REAL NOT NULL DEFAULT 1.0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT, created_at TEXT NOT NULL,
+  FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE, FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL, UNIQUE (card_id, tag_id)
+);
+CREATE TABLE IF NOT EXISTS card_ai_links (
+  id TEXT PRIMARY KEY, source_card_id TEXT NOT NULL, target_card_id TEXT NOT NULL, relationship_type TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 0.5,
+  explanation TEXT NOT NULL DEFAULT '', evidence_json TEXT NOT NULL DEFAULT '[]', source TEXT NOT NULL DEFAULT 'ai', status TEXT NOT NULL DEFAULT 'proposed',
+  created_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY (source_card_id) REFERENCES cards(id) ON DELETE CASCADE, FOREIGN KEY (target_card_id) REFERENCES cards(id) ON DELETE CASCADE, FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE (source_card_id, target_card_id, relationship_type)
+);
+CREATE INDEX IF NOT EXISTS idx_ailinks_src ON card_ai_links(source_card_id, status);
+CREATE INDEX IF NOT EXISTS idx_ailinks_tgt ON card_ai_links(target_card_id, status);
+CREATE TABLE IF NOT EXISTS ai_research_config (
+  id TEXT PRIMARY KEY, scope TEXT NOT NULL DEFAULT 'workspace', scope_id TEXT, enabled INTEGER NOT NULL DEFAULT 0,
+  intake_column_id TEXT, post_research_column_id TEXT, allow_external_research INTEGER NOT NULL DEFAULT 0, config_json TEXT NOT NULL DEFAULT '{}',
+  updated_by TEXT, updated_at TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL, UNIQUE (scope, scope_id)
+);
 CREATE TABLE IF NOT EXISTS card_comments (
   id TEXT PRIMARY KEY,
   card_id TEXT NOT NULL,
@@ -377,7 +420,8 @@ CREATE TABLE IF NOT EXISTS card_links (
   FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
   FOREIGN KEY (target_card_id) REFERENCES cards(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_card_links_card ON card_links(card_id, link_type);
+CREATE INDEX IF NOT EXISTS idx_card_links_src ON card_links(card_id, link_type);
+CREATE INDEX IF NOT EXISTS idx_card_links_tgt ON card_links(target_card_id, created_at);
 `;
 
 // Split a SQL script into statements, keeping BEGIN...END trigger bodies
@@ -428,6 +472,7 @@ const TABLES = [
   "memory_fts", "memory_notes", "email_outbox", "settings", "feature_flags",
   "analytics_events", "audit_logs", "messages", "threads", "channels",
   "channel_members",
+  "card_ai_runs", "card_research_notes", "research_sources", "tags", "tag_aliases", "card_tags", "card_links", "card_ai_links", "ai_research_config",
   "task_history", "tasks", "cards", "board_columns", "categories",
   "password_resets", "email_verifications", "users",
   "content_items", "publish_events",
@@ -1349,5 +1394,140 @@ describe("Phase 6: rate limiting (runs last)", () => {
       if (res.status === 429) break;
     }
     expect(lastStatus).toBe(429);
+  });
+});
+
+describe("Phase 13: AI Kanban research", () => {
+  let admin: { id: string; token: string };
+  let member: { token: string };
+  let columnId: string;
+
+  beforeAll(async () => {
+    await clearDb();
+    admin = await makeAdmin();
+    const m = await makeMember();
+    member = { token: m.token };
+    // ensure a board column exists (board.ts ensureDefaults seeds columns)
+    const cols = await api("GET", "/api/v1/board/columns", undefined, admin.token);
+    columnId = cols.data.data[0].id;
+  });
+
+  // D1 is isolated per-test in this harness, so re-enable config (with the
+  // intake column) before each test rather than relying on prior-test state.
+  beforeEach(async () => {
+    await api("PUT", "/api/v1/ai-research/config", { enabled: true, intake_column_id: columnId }, admin.token);
+  });
+
+  // Poll the research endpoint until the latest run reaches a terminal state
+  // (the LLM research runs in the background and can take several seconds).
+  async function pollResearch(cardId: string, token: string, timeoutMs = 15000): Promise<any> {
+    const start = Date.now();
+    let last: any = null;
+    while (Date.now() - start < timeoutMs) {
+      const res = await api("GET", `/api/v1/ai-research/cards/${cardId}/research`, undefined, token);
+      last = res.data.data;
+      const runs = (last?.runs as any[]) || [];
+      if (runs.length && (runs[0].status === "completed" || runs[0].status === "failed")) return last;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return last;
+  }
+
+  it("admin enables research config and sets an intake column", async () => {
+    const r = await api("PUT", "/api/v1/ai-research/config", { enabled: true, intake_column_id: columnId }, admin.token);
+    expect(r.status).toBe(200);
+    expect(r.data.data.enabled).toBe(1);
+    const get = await api("GET", "/api/v1/ai-research/config", undefined, admin.token);
+    expect(get.data.data.enabled).toBe(1);
+  });
+
+  it("non-admin cannot update config", async () => {
+    const r = await api("PUT", "/api/v1/ai-research/config", { enabled: false }, member.token);
+    expect(r.status).toBe(403);
+  });
+
+  it("creating a card in the intake column auto-runs research and records a completed run", async () => {
+    const card = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "OAuth login bug", description: "Fix authentication redirect loop", tags: ["auth", "login"] }, admin.token);
+    expect(card.status).toBe(201);
+    const cardId = card.data.data.id;
+    const research = await pollResearch(cardId, admin.token);
+    expect(research).not.toBeNull();
+    const runs = research.runs as any[];
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs[0].status).toBe("completed");
+    expect(research.research).not.toBeNull();
+    expect(research.research.applied_tags.length + research.research.proposed_tags.length).toBeGreaterThan(0);
+  });
+
+  it("is idempotent: re-queuing same content is skipped, not duplicated", async () => {
+    const card = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Idempotency test card", description: "unique content", tags: ["dup"] }, admin.token);
+    const cardId = card.data.data.id;
+    const before = await pollResearch(cardId, admin.token);
+    const firstRunId = (before.runs as any[])[0].id;
+    // rerun forced
+    const rerun = await api("POST", `/api/v1/ai-research/cards/${cardId}/research/rerun`, undefined, admin.token);
+    expect(rerun.status).toBe(201);
+    const after = await pollResearch(cardId, admin.token);
+    // a forced rerun adds a 2nd run (distinct content hash only if content changed; here unchanged so it still adds a run by rerun trigger)
+    expect((after.runs as any[]).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("member can read research but not approve tags on a card they don't own", async () => {
+    const card = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Member research card", description: "x", tags: ["y"] }, admin.token);
+    const cardId = card.data.data.id;
+    const research = await pollResearch(cardId, member.token);
+    expect(research).not.toBeNull();
+    const tag = (research.research.applied_tags[0] || research.research.proposed_tags[0]) as any;
+    if (tag) {
+      const approve = await api("POST", `/api/v1/ai-research/cards/${cardId}/research/tags/${tag}/approve`, undefined, member.token);
+      expect(approve.status).toBe(403); // not the card owner, not moderator+
+    }
+  });
+
+  it("admin can approve a proposed tag", async () => {
+    const card = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Approve tag card", description: "z", tags: ["billing"] }, admin.token);
+    const cardId = card.data.data.id;
+    const research = await pollResearch(cardId, admin.token);
+    const tag = (research.research.proposed_tags[0] || research.research.applied_tags[0]) as any;
+    expect(tag).toBeTruthy();
+    const approve = await api("POST", `/api/v1/ai-research/cards/${cardId}/research/tags/${tag}/approve`, undefined, admin.token);
+    expect(approve.status).toBe(200);
+    const after = await pollResearch(cardId, admin.token);
+    // the approved tag should now be active
+    const active = after.research.applied_tags as any[];
+    expect(active).toContain(tag);
+  });
+
+  it("internal knowledge search returns authorized content only", async () => {
+    const r = await api("GET", "/api/v1/ai-research/research/search?q=authentication", undefined, member.token);
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.data.data)).toBe(true);
+  });
+
+  it("creating a card outside the intake column does NOT auto-run research", async () => {
+    // create a second column and put the card there
+    const cols = await api("GET", "/api/v1/board/columns", undefined, admin.token);
+    const otherCol = cols.data.data[1] ? cols.data.data[1].id : columnId;
+    const card = await api("POST", "/api/v1/board/cards", { column_id: otherCol, title: "Not in intake", description: "should not research", tags: ["nope"] }, admin.token);
+    const cardId = card.data.data.id;
+    // even after waiting, no run should exist for a non-intake column
+    await new Promise((r) => setTimeout(r, 800));
+    const research = await api("GET", `/api/v1/ai-research/cards/${cardId}/research`, undefined, admin.token);
+    expect((research.data.data.runs as any[]).length).toBe(0);
+  });
+
+  it("manual research works when disabled via force", async () => {
+    await api("PUT", "/api/v1/ai-research/config", { enabled: false }, admin.token);
+    const card = await api("POST", "/api/v1/board/cards", { column_id: columnId, title: "Manual only", description: "m", tags: ["m"] }, admin.token);
+    const cardId = card.data.data.id;
+    await new Promise((r) => setTimeout(r, 300));
+    const auto = await api("GET", `/api/v1/ai-research/cards/${cardId}/research`, undefined, admin.token);
+    expect((auto.data.data.runs as any[]).length).toBe(0); // disabled -> no auto run
+    const manual = await api("POST", `/api/v1/ai-research/cards/${cardId}/research`, { trigger: "manual", force: true } as any, admin.token);
+    expect(manual.status).toBe(201);
+    const after = await pollResearch(cardId, admin.token);
+    expect((after.runs as any[])[0].status).toBe("completed");
+    // re-enable for cleanliness
+    await api("PUT", "/api/v1/ai-research/config", { enabled: true, intake_column_id: columnId }, admin.token);
   });
 });

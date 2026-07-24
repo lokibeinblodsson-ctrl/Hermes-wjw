@@ -23,6 +23,7 @@ import dataRoutes from "./routes/data";
 import docsRoutes from "./routes/docs";
 import hermesRoutes from "./routes/hermes";
 import calendarRoutes from "./routes/calendar";
+import aiResearchRoutes from "./routes/aiResearch";
 import filesRoutes from "./routes/files";
 import cardhubRoutes from "./routes/cardhub";
 
@@ -256,6 +257,7 @@ app.route("/api/v1/data", dataRoutes);
 app.route("/api/v1/docs", docsRoutes);
 app.route("/api/v1/hermes", hermesRoutes);
 app.route("/api/v1/calendar", calendarRoutes);
+app.route("/api/v1/ai-research", aiResearchRoutes);
 app.route("/api/v1/files", filesRoutes);
 app.route("/api/v1/board", cardhubRoutes);
 app.route("/api/v1", apiRoutes);

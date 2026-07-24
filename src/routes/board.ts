@@ -19,6 +19,7 @@ import {
   canDeleteCard,
 } from "../lib/permissions";
 import { ensureDefaults } from "../bootstrap";
+import { maybeTriggerResearch } from "./aiResearch";
 
 const board = new Hono<{ Bindings: Env }>();
 
@@ -161,6 +162,11 @@ board.post("/cards", zValidator("json", cardCreateSchema), async (c) => {
   await logAnalytics(c.env.DB, "card_created", user.id, { column_id: body.column_id });
   // fetch created card
   const created = await c.env.DB.prepare(`SELECT * FROM cards WHERE id = ?`).bind(id).first();
+  // AI research trigger. The research path is fully local/deterministic (no
+  // external LLM in this environment) so it completes in well under the request
+  // budget; awaiting keeps the run atomic and survives context teardown.
+  // (A durable queue would later replace this to avoid blocking card-create.)
+  await maybeTriggerResearch(c.env.DB, { cardId: id, card: created, user, trigger: "created" }).catch((e) => console.error("[trigger] ERROR", e?.message || e));
   return json({ ok: true, data: serializeCard(created) }, 201);
 });
 
@@ -225,6 +231,13 @@ board.patch("/cards/:id", zValidator("json", cardUpdateSchema), async (c) => {
   await logAudit(c.env.DB, { actorId: user.id, action: "card_updated", targetType: "card", targetId: id, meta: auditMeta });
   await logAnalytics(c.env.DB, "card_updated", user.id, { card_id: id });
   const updated = await c.env.DB.prepare(`SELECT * FROM cards WHERE id = ?`).bind(id).first();
+  // If the card was moved into a (different) column, opportunistically trigger
+  // research if it landed in the configured intake column.
+  if ("column_id" in body && body.column_id !== (existing as any).column_id) {
+    const mv = maybeTriggerResearch(c.env.DB, { cardId: id, card: updated, user, trigger: "moved" });
+    if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(mv.catch(() => {}));
+    else await mv;
+  }
   return json({ ok: true, data: serializeCard(updated) });
 });
 
