@@ -33,3 +33,6 @@ logs/
 # wrangler deploy output
 .wrangler-deploy/
 .dev-admin.txt
+
+# Accidental tool cache (dotnet CLI sentinel, committed by mistake 2026-07-19)
+3M0YHCQfKWAYYpGOQ_AjTg/
