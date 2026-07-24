@@ -284,5 +284,102 @@ export const MIGRATION_COLUMNS: Record<string, string[]> = {
     "target_title",
     "target_url",
     "updated_at"
+  ],
+  "channel_members": [
+    "added_by",
+    "channel_id",
+    "created_at",
+    "id",
+    "user_id"
+  ],
+  "card_ai_runs": [
+    "card_id",
+    "completed_at",
+    "config_json",
+    "content_hash",
+    "created_at",
+    "created_by",
+    "error",
+    "id",
+    "intake_json",
+    "status",
+    "trigger",
+    "updated_at"
+  ],
+  "card_research_notes": [
+    "applied_tags_json",
+    "card_id",
+    "content_json",
+    "created_at",
+    "created_by",
+    "id",
+    "proposed_links_json",
+    "proposed_tags_json",
+    "run_id",
+    "sources_json",
+    "status",
+    "updated_at",
+    "version"
+  ],
+  "research_sources": [
+    "id",
+    "note_id",
+    "published_date",
+    "publisher",
+    "relevance",
+    "retrieved_at",
+    "title",
+    "url"
+  ],
+  "tags": [
+    "created_at",
+    "created_by",
+    "id",
+    "name",
+    "source",
+    "usage_count"
+  ],
+  "tag_aliases": [
+    "alias",
+    "canonical_tag_id",
+    "created_by",
+    "id"
+  ],
+  "card_tags": [
+    "card_id",
+    "confidence",
+    "created_at",
+    "created_by",
+    "id",
+    "source",
+    "status",
+    "tag_id"
+  ],
+  "card_ai_links": [
+    "confidence",
+    "created_at",
+    "created_by",
+    "evidence_json",
+    "explanation",
+    "id",
+    "relationship_type",
+    "source",
+    "source_card_id",
+    "status",
+    "target_card_id",
+    "updated_at"
+  ],
+  "ai_research_config": [
+    "allow_external_research",
+    "config_json",
+    "created_at",
+    "enabled",
+    "id",
+    "intake_column_id",
+    "post_research_column_id",
+    "scope",
+    "scope_id",
+    "updated_at",
+    "updated_by"
   ]
 };
